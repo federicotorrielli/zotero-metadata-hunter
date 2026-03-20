@@ -11,6 +11,9 @@ const windowKeyHandlers = new WeakMap<Window, (e: KeyboardEvent) => void>();
 Zotero.DOIFinder = {
   async startup(_data: { id: string; version: string; rootURI: string }) {
     Zotero.debug("DOI Finder: Startup");
+    for (const win of Zotero.getMainWindows()) {
+      Zotero.DOIFinder.onMainWindowLoad(win);
+    }
   },
 
   shutdown() {
