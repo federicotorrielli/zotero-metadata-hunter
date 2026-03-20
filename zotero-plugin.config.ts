@@ -13,7 +13,7 @@ export default defineConfig({
        entryPoints: ["src/index.ts"],
        bundle: true,
        format: "iife",
-       target: "firefox115",
+       target: "firefox128",
        outfile: "addon/content/scripts/index.js",
      },
    ],
