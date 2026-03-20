@@ -21,19 +21,17 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dnnunn/zotero-doi-finder.git"
+    "url": "git+https://github.com/federicotorrielli/zotero-doi-finder.git"
   },
   "author": {
-    "name": "David Nunn",
-    "email": "dnnunn@gmail.com"
+    "name": "Federico Torrielli",
+    "email": "evilscript@protonmail.com"
   },
   "bugs": {
-    "url": "https://github.com/dnnunn/zotero-doi-finder/issues"
+    "url": "https://github.com/federicotorrielli/zotero-doi-finder/issues"
   },
-  "homepage": "https://github.com/dnnunn/zotero-doi-finder#readme",
-  "dependencies": {
-    "zotero-plugin-toolkit": "^2.3.15"
-  },
+  "homepage": "https://github.com/federicotorrielli/zotero-doi-finder#readme",
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^20.10.4",
     "@typescript-eslint/eslint-plugin": "^6.13.2",

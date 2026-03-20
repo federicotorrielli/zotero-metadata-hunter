@@ -2,96 +2,31 @@ import { config } from "../../package.json";
 import { getString } from "../utils/locale";
 
 declare const Zotero: any;
-declare const Services: any;
 
-export function registerMenus() {
-  const doc = Zotero.getMainWindow().document;
-  
-  // Tools menu
+export function registerWindowMenus(win: Window) {
+  const doc = (win as any).document;
+
   const toolsMenu = doc.getElementById("menu_ToolsPopup");
-  if (toolsMenu) {
+  if (toolsMenu && !doc.getElementById(`${config.addonRef}-tools-menu`)) {
     const menuitem = doc.createXULElement("menuitem");
     menuitem.id = `${config.addonRef}-tools-menu`;
     menuitem.setAttribute("label", getString("menu.findDOILibrary"));
-    menuitem.setAttribute("oncommand", "Zotero.DOIFinder.findDOIs();");
+    menuitem.addEventListener("command", () => Zotero.DOIFinder.findDOIs());
     toolsMenu.appendChild(menuitem);
   }
-  
-  // Right-click menu for items
+
   const itemMenu = doc.getElementById("zotero-itemmenu");
-  if (itemMenu) {
+  if (itemMenu && !doc.getElementById(`${config.addonRef}-item-menu`)) {
     const menuitem = doc.createXULElement("menuitem");
     menuitem.id = `${config.addonRef}-item-menu`;
     menuitem.setAttribute("label", getString("menu.findDOI"));
-    menuitem.setAttribute("oncommand", "Zotero.DOIFinder.findDOIsForSelected();");
+    menuitem.addEventListener("command", () => Zotero.DOIFinder.findDOIsForSelected());
     itemMenu.appendChild(menuitem);
   }
-  
-  // Export function for selected items
-  // Export function for selected items
-  Zotero.DOIFinder.findDOIsForSelected = async () => {
-    const ZP = Zotero.getActiveZoteroPane();
-    const items = ZP.getSelectedItems();
-    
+}
 
-    // Count items with DOIs and abstracts before filtering
-    let totalRegularItems = 0;
-    let itemsWithDOI = 0;
-    let itemsWithAbstract = 0;
-    
-    items.forEach((item: any) => {
-      if (item.isRegularItem()) {
-        totalRegularItems++;
-        const doi = item.getField("DOI");
-        const abstract = item.getField("abstractNote");
-        
-        if (doi && doi.trim() !== "" && doi.trim() !== "-") {
-          itemsWithDOI++;
-        }
-        if (abstract && abstract.trim() !== "") {
-          itemsWithAbstract++;
-        }
-      }
-    });
-    // Use the same filtering logic as main function
-    const itemsToProcess = items.filter((item: any) => {
-      if (!item.isRegularItem()) return false;
-      
-      const doi = item.getField('DOI');
-      const abstract = item.getField('abstractNote');
-      
-      const needsDOI = !doi || doi.trim() === '' || doi.trim() === '-';
-      const needsAbstract = !abstract || abstract.trim() === '';
-      
-      return needsDOI || needsAbstract;
-    });
-    
-    if (itemsToProcess.length === 0) {
-      Services.prompt.alert(null, getString("findDOI.noneSelected") || "Complete", "All selected items already have DOI numbers and abstracts.");
-      return;
-    }
-    
-    const result = await Zotero.DOIFinder.processItems(itemsToProcess, {
-      withDOI: itemsWithDOI,
-      withAbstract: itemsWithAbstract,
-      totalRegular: totalRegularItems
-    });
-    
-    // Use the same detailed message as main function
-    let message = `Found ${result.foundDOIs} new DOIs and ${result.foundAbstracts} abstracts for ${result.total} items processed.`;
-    
-    if (result.foundDOIs === 0 && result.foundAbstracts === 0) {
-      message = "No new DOIs or abstracts were found.";
-    } else if (result.foundDOIs === 0) {
-      message = `Found ${result.foundAbstracts} new abstracts. No new DOIs were found.`;
-    } else if (result.foundAbstracts === 0) {
-      message = `Found ${result.foundDOIs} new DOIs. No abstracts were found.`;
-    }
-    
-    Services.prompt.alert(
-      null,
-      getString("findDOI.title") || "DOI and Abstract Finder",
-      message
-    );
-  };
+export function unregisterWindowMenus(win: Window) {
+  const doc = (win as any).document;
+  doc.getElementById(`${config.addonRef}-tools-menu`)?.remove();
+  doc.getElementById(`${config.addonRef}-item-menu`)?.remove();
 }

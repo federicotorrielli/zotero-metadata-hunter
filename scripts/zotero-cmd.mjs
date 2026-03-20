@@ -71,7 +71,7 @@ export async function build() {
     entryPoints: [path.join(rootPath, "src", "index.ts")],
     bundle: true,
     format: "iife",
-    target: "firefox115",
+    target: "firefox128",
     outfile: path.join(addonPath, "content", "scripts", "index.js"),
   });
   

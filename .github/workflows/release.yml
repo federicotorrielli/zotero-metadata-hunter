@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build XPI
+        run: npm run build
+
+      - name: Read version and addon ID
+        id: meta
+        run: |
+          echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+          echo "addon_id=$(node -p "require('./package.json').config.addonID")" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "v${{ steps.meta.outputs.version }}"
+          generate_release_notes: true
+          files: build/${{ steps.meta.outputs.addon_id }}-${{ steps.meta.outputs.version }}.xpi
+
+      - name: Update update.json
+        run: |
+          VERSION="${{ steps.meta.outputs.version }}"
+          ADDON_ID="${{ steps.meta.outputs.addon_id }}"
+          TAG="${{ github.ref_name }}"
+          REPO="${{ github.repository }}"
+          cat > update.json <<EOF
+          {
+            "addons": {
+              "${ADDON_ID}": {
+                "updates": [
+                  {
+                    "version": "${VERSION}",
+                    "update_link": "https://github.com/${REPO}/releases/download/${TAG}/${ADDON_ID}-${VERSION}.xpi"
+                  }
+                ]
+              }
+            }
+          }
+          EOF
+
+      - name: Commit and push update.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          git add update.json
+          git diff --staged --quiet || git commit -m "chore: update update.json for ${{ github.ref_name }}"
+          git push origin main
