@@ -1,60 +1,69 @@
 # Zotero DOI Finder
 
-A Zotero plugin that automatically finds and adds missing DOI numbers and abstracts to your references using CrossRef, Semantic Scholar, PubMed, and OpenAlex APIs.
+A Zotero plugin that automatically finds and adds missing DOIs and abstracts to your references.
 
 ## Features
 
-- **Automatic DOI Discovery**: Searches CrossRef for missing DOIs using title and author information
-- **Abstract Finder**: Fetches missing abstracts via Semantic Scholar, PubMed, and OpenAlex (waterfall fallback)
-- **Smart Matching**: Uses fuzzy title matching (Levenshtein distance) to ensure accurate results
-- **Bulk Processing**: Process entire collections or libraries at once
-- **Native Zotero Integration**: Integrates with Zotero 7/8's interface
+- **4 DOI sources**: CrossRef → DBLP → Semantic Scholar → arXiv, tried in order
+- **3 abstract sources**: Semantic Scholar, PubMed, and OpenAlex raced in parallel — fastest wins
+- **Parallel processing**: items processed in batches of 5 (~10× faster than serial)
+- **Smart title matching**: Levenshtein similarity with length-gating and subtitle-aware query cleaning
+- **Cancellable**: press `Ctrl/Cmd+Alt+D` or click the toolbar button again to stop mid-run
+- **Live progress**: headline shows a running tally and ETA while processing
 
 ## Installation
 
-1. Download the latest `.xpi` file from the [Releases](https://github.com/federicotorrielli/zotero-doi-finder/releases) page
-2. Open Zotero
-3. Go to Tools → Add-ons
-4. Click the gear icon and select "Install Add-on From File..."
-5. Select the downloaded `.xpi` file
+1. Download the latest `.xpi` from the [Releases](https://github.com/federicotorrielli/zotero-doi-finder/releases) page
+2. In Zotero: **Tools → Add-ons → ⚙ → Install Add-on From File…**
+3. Select the `.xpi` file and restart if prompted
 
 ## Usage
 
-### Selected items
-1. Select one or more items in your library
-2. Right-click and choose "Find DOI and Abstract"
+| Trigger | Scope |
+|---|---|
+| Right-click → **Find DOI and Abstract** | Selected items only |
+| **Tools → Find DOIs and Abstracts in Library** | Current collection or full library |
+| Toolbar button | Current collection or full library |
+| `Ctrl/Cmd + Alt + D` | Current collection or full library |
 
-### Entire library / collection
-1. Go to **Tools → Find DOIs and Abstracts in Library**
-2. Or click the toolbar button
-3. Or use the keyboard shortcut: `Ctrl/Cmd + Alt + D`
-
-If items are selected, only those are processed; otherwise the current collection or full library is used.
+Items that already have both a DOI and an abstract are skipped. To cancel a running operation, press `Ctrl/Cmd+Alt+D` again or click the toolbar button — it toggles.
 
 ## How It Works
 
-1. For each item missing a DOI: queries CrossRef with the title, first author, and year, then verifies the match with title similarity scoring (threshold: 0.85)
-2. For each item missing an abstract: tries Semantic Scholar → PubMed → OpenAlex in order, stopping at the first result
+**DOI finding** (sources tried in order until one matches):
+1. **CrossRef** — title + author + year; falls back to title-only if the narrow query finds nothing
+2. **DBLP** — strong coverage of CS conference and journal papers
+3. **Semantic Scholar** — `/paper/search/match` endpoint; returns DOI *and* abstract in one call, skipping the abstract lookup when it wins
+4. **arXiv** — extracts the journal DOI from `<arxiv:doi>` when the author has submitted one
+
+**Abstract finding** (all three sources queried simultaneously; first non-null result wins):
+- Semantic Scholar (by DOI), PubMed (esearch + efetch), OpenAlex
+
+**Title matching**: candidates are verified with fuzzy matching (Levenshtein similarity ≥ 0.85), gated by a ≤15% length-difference check that applies to both substring and similarity checks.
 
 ## Development
 
 ### Prerequisites
-- Node.js (v16 or higher)
+- Node.js 20+, pnpm
 - Zotero 7 or 8
 
 ### Setup
 ```bash
 git clone https://github.com/federicotorrielli/zotero-doi-finder.git
 cd zotero-doi-finder
-npm install
-npm run build
+pnpm install
+pnpm run build    # production XPI
+pnpm run start    # dev mode with live reload into Zotero
+pnpm run lint     # Prettier + ESLint
 ```
 
 ### Releasing
-Tag a commit and push — the GitHub Action handles building the XPI and publishing the release:
+Bump the version in `package.json`, commit, tag, and push — the GitHub Action builds the XPI, creates the release, and updates `update.json` automatically:
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+# edit package.json version first
+git commit -am "chore: bump version to X.Y.Z"
+git tag vX.Y.Z
+git push origin main vX.Y.Z
 ```
 
 ## License

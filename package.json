@@ -1,6 +1,6 @@
 {
   "name": "zotero-doi-finder",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A Zotero plugin to find and add missing DOI numbers and abstracts to references",
   "config": {
     "addonName": "DOI and Abstract Finder",
