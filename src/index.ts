@@ -171,8 +171,15 @@ function cleanTitleForQuery(title: string): string {
     .replace(/&#39;/g, "'")
     .replace(/&[a-z]+;/gi, " ");
 
-  // Drop subtitle (after colon or em-dash) — CrossRef ranks shorter, focused queries higher
-  const noSubtitle = decoded.replace(/\s*[:\u2014].*$/, "").trim();
+  // Drop subtitle (after colon or em-dash) only when the pre-colon fragment is long
+  // enough to be a meaningful standalone query (≥4 words). Short main titles like
+  // "Machine generated text: a comprehensive survey..." or "BERT: Pre-training of..."
+  // rely on their subtitle for distinctiveness — stripping them yields a generic phrase
+  // that returns unrelated results from every API.
+  const colonIdx = decoded.search(/\s*[:\u2014]/);
+  const fragment = colonIdx !== -1 ? decoded.slice(0, colonIdx).trim() : decoded;
+  const wordCount = fragment.split(/\s+/).filter(Boolean).length;
+  const noSubtitle = colonIdx !== -1 && wordCount >= 4 ? fragment : decoded;
 
   // Truncate at a word boundary around 100 chars
   if (noSubtitle.length <= 100) return noSubtitle;
@@ -195,13 +202,17 @@ function isTitleMatch(title1: string, title2: string): boolean {
   const n1 = normalize(title1);
   const n2 = normalize(title2);
 
-  if (n1 === n2 || n1.includes(n2) || n2.includes(n1)) return true;
+  if (n1 === n2) return true;
 
-  // If the length difference alone rules out ≥0.85 similarity, skip the O(n²) matrix
+  // Gate ALL fuzzy checks behind the length ratio. A short string being a substring
+  // of a long one (e.g. "Large Language Models" inside "A Watermark for Large Language
+  // Models") does not mean they are the same paper — apply the same ≤15% length
+  // difference requirement before both the substring and Levenshtein checks.
   const longer = Math.max(n1.length, n2.length);
   const shorter = Math.min(n1.length, n2.length);
   if (longer > 0 && (longer - shorter) / longer > 0.15) return false;
 
+  if (n1.includes(n2) || n2.includes(n1)) return true;
   return calculateSimilarity(n1, n2) > 0.85;
 }
 
@@ -246,23 +257,15 @@ async function findDOIFromCrossRef(
   item: any,
   title: string,
 ): Promise<DOIResult | null> {
-  const queryParts = [
-    `query.bibliographic=${encodeURIComponent(cleanTitleForQuery(title))}`,
-  ];
-
   const creators = item.getCreators();
-  if (creators.length > 0 && creators[0].lastName) {
-    queryParts.push(`query.author=${encodeURIComponent(creators[0].lastName)}`);
-  }
-
+  const lastName = creators.length > 0 ? creators[0].lastName : null;
   const year = item.getField("date")?.match(/\d{4}/)?.[0];
-  if (year) {
-    queryParts.push(`filter=from-pub-date:${year},until-pub-date:${year}`);
-  }
+  const titleParam = `query.bibliographic=${encodeURIComponent(cleanTitleForQuery(title))}`;
 
-  const url = `https://api.crossref.org/works?${queryParts.join("&")}&rows=5`;
-
-  try {
+  // Helper: run one CrossRef query and return the first title-matching result.
+  const queryCrossRef = async (extraParams: string[]): Promise<DOIResult | null> => {
+    const params = [titleParam, ...extraParams].join("&");
+    const url = `https://api.crossref.org/works?${params}&rows=10`;
     const response: any = await withTimeout(
       Zotero.HTTP.request("GET", url, {
         headers: { "User-Agent": `Zotero DOI Finder/${version}` },
@@ -275,6 +278,22 @@ async function findDOIFromCrossRef(
         return { doi: crossrefItem.DOI as string, abstract: null };
       }
     }
+    return null;
+  };
+
+  try {
+    // First attempt: narrow query with author + year filter for precision.
+    const narrowParams: string[] = [];
+    if (lastName) narrowParams.push(`query.author=${encodeURIComponent(lastName)}`);
+    if (year) narrowParams.push(`filter=from-pub-date:${year},until-pub-date:${year}`);
+
+    const narrow = await queryCrossRef(narrowParams);
+    if (narrow) return narrow;
+
+    // Fallback: title-only query. Author substring matching in CrossRef can surface
+    // wrong results (e.g. "Kirchenbauer" matching "Müller-Kirchenbauer"), so if the
+    // narrowed query found nothing we retry without author/year constraints.
+    if (narrowParams.length > 0) return await queryCrossRef([]);
   } catch (e) {
     Zotero.debug(`DOI Finder: CrossRef request failed: ${e}`);
   }
@@ -390,19 +409,13 @@ async function findDOIFromArXiv(
 
 // Semantic Scholar: title match + DOI + abstract in a single request.
 // Uses /paper/search/match which is designed for exact title lookup and returns
-// the single best-scoring result directly, avoiding the need to pick from a list.
+// the single best-scoring result directly. Author is intentionally excluded —
+// this endpoint is a pure title matcher and extra terms break its scoring.
 async function findDOIFromSemanticScholar(
-  item: any,
+  _item: any,
   title: string,
 ): Promise<DOIResult | null> {
-  const creators = item.getCreators();
-  const authorPart =
-    creators.length > 0 && creators[0].lastName
-      ? `+${encodeURIComponent(creators[0].lastName)}`
-      : "";
-
-  const query = encodeURIComponent(cleanTitleForQuery(title)) + authorPart;
-  const url = `https://api.semanticscholar.org/graph/v1/paper/search/match?query=${query}&fields=externalIds,title,abstract`;
+  const url = `https://api.semanticscholar.org/graph/v1/paper/search/match?query=${encodeURIComponent(cleanTitleForQuery(title))}&fields=externalIds,title,abstract`;
 
   try {
     const response: any = await withTimeout(
