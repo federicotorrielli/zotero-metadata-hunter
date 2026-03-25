@@ -31,12 +31,14 @@ Items that already have both a DOI and an abstract are skipped. To cancel a runn
 ## How It Works
 
 **DOI finding** (sources tried in order until one matches):
+
 1. **CrossRef** — title + author + year; falls back to title-only if the narrow query finds nothing
 2. **DBLP** — strong coverage of CS conference and journal papers
 3. **Semantic Scholar** — `/paper/search/match` endpoint; returns DOI *and* abstract in one call, skipping the abstract lookup when it wins
 4. **arXiv** — extracts the journal DOI from `<arxiv:doi>` when the author has submitted one
 
 **Abstract finding** (all three sources queried simultaneously; first non-null result wins):
+
 - Semantic Scholar (by DOI), PubMed (esearch + efetch), OpenAlex
 
 **Title matching**: candidates are verified with fuzzy matching (Levenshtein similarity ≥ 0.85), gated by a ≤15% length-difference check that applies to both substring and similarity checks.
@@ -44,10 +46,12 @@ Items that already have both a DOI and an abstract are skipped. To cancel a runn
 ## Development
 
 ### Prerequisites
+
 - Node.js 20+, pnpm
 - Zotero 7 or 8
 
 ### Setup
+
 ```bash
 git clone https://github.com/federicotorrielli/zotero-doi-finder.git
 cd zotero-doi-finder
@@ -58,7 +62,9 @@ pnpm run lint     # Prettier + ESLint
 ```
 
 ### Releasing
+
 Bump the version in `package.json`, commit, tag, and push — the GitHub Action builds the XPI, creates the release, and updates `update.json` automatically:
+
 ```bash
 # edit package.json version first
 git commit -am "chore: bump version to X.Y.Z"
@@ -69,7 +75,3 @@ git push origin main vX.Y.Z
 ## License
 
 AGPL-3.0 — see the LICENSE file for details.
-
-## Author
-
-Federico Torrielli — evilscript@protonmail.com
