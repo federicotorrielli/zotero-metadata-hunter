@@ -3,8 +3,8 @@
     "doifinder@zotero.org": {
       "updates": [
         {
-          "version": "0.1.0",
-          "update_link": "https://github.com/federicotorrielli/zotero-doi-finder/releases/download/v0.1.0/doifinder@zotero.org-0.1.0.xpi"
+          "version": "0.1.1",
+          "update_link": "https://github.com/federicotorrielli/zotero-doi-finder/releases/download/v0.1.1/doifinder@zotero.org-0.1.1.xpi"
         }
       ]
     }
