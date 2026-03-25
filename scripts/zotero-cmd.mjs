@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, statS
 import path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
-import replaceInFile from "replace-in-file";
+import { replaceInFileSync } from "replace-in-file";
 import compressing from "compressing";
 import esbuild from "esbuild";
 
@@ -58,7 +58,7 @@ export async function build() {
     pkg.config.addonRef,
   ];
   
-  replaceInFile.sync({
+  replaceInFileSync({
     files: [`${addonPath}/**/*.*`],
     from: replaceFrom,
     to: replaceTo,

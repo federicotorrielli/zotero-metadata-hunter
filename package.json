@@ -1,6 +1,6 @@
 {
   "name": "zotero-doi-finder",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "A Zotero plugin to find and add missing DOI numbers and abstracts to references",
   "config": {
     "addonName": "DOI and Abstract Finder",
@@ -33,18 +33,18 @@
   "homepage": "https://github.com/federicotorrielli/zotero-doi-finder#readme",
   "dependencies": {},
   "devDependencies": {
-    "@types/node": "^20.10.4",
-    "@typescript-eslint/eslint-plugin": "^6.13.2",
-    "@typescript-eslint/parser": "^6.13.2",
-    "chokidar": "^3.5.3",
-    "compressing": "^1.10.0",
-    "esbuild": "^0.19.8",
-    "eslint": "^8.55.0",
-    "eslint-config-prettier": "^9.1.0",
-    "prettier": "^3.1.0",
-    "release-it": "^17.0.0",
-    "replace-in-file": "^7.0.2",
-    "typescript": "^5.3.2",
-    "zotero-types": "^1.3.10"
+    "@types/node": "^25.5.0",
+    "@typescript-eslint/eslint-plugin": "^8.57.2",
+    "@typescript-eslint/parser": "^8.57.2",
+    "chokidar": "^5.0.0",
+    "compressing": "^2.1.0",
+    "esbuild": "^0.27.4",
+    "eslint": "^10.1.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.8.1",
+    "release-it": "^19.2.4",
+    "replace-in-file": "^8.4.0",
+    "typescript": "^6.0.2",
+    "zotero-types": "^4.1.2"
   }
 }
