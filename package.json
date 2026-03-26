@@ -1,13 +1,13 @@
 {
-  "name": "zotero-doi-finder",
-  "version": "0.1.1",
+  "name": "zotero-metadata-hunter",
+  "version": "0.1.2",
   "description": "A Zotero plugin to find and add missing DOI numbers and abstracts to references",
   "config": {
-    "addonName": "DOI and Abstract Finder",
-    "addonID": "doifinder@zotero.org",
-    "addonRef": "doifinder",
-    "addonInstance": "DOIFinder",
-    "prefsPrefix": "extensions.zotero.doifinder"
+    "addonName": "Metadata Hunter",
+    "addonID": "metadatahunter@zotero.org",
+    "addonRef": "metadatahunter",
+    "addonInstance": "MetadataHunter",
+    "prefsPrefix": "extensions.zotero.metadatahunter"
   },
   "main": "src/index.ts",
   "scripts": {
@@ -17,20 +17,20 @@
     "lint": "prettier --write . && eslint . --ext .ts --fix",
     "test": "echo \"Error: no test specified\" && exit 1",
     "release": "release-it",
-    "update-deps": "npm update --save"
+    "update-deps": "pnpm update --save"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/federicotorrielli/zotero-doi-finder.git"
+    "url": "git+https://github.com/federicotorrielli/zotero-metadata-hunter.git"
   },
   "author": {
     "name": "Federico Torrielli",
     "email": "evilscript@protonmail.com"
   },
   "bugs": {
-    "url": "https://github.com/federicotorrielli/zotero-doi-finder/issues"
+    "url": "https://github.com/federicotorrielli/zotero-metadata-hunter/issues"
   },
-  "homepage": "https://github.com/federicotorrielli/zotero-doi-finder#readme",
+  "homepage": "https://github.com/federicotorrielli/zotero-metadata-hunter#readme",
   "dependencies": {},
   "devDependencies": {
     "@types/node": "^25.5.0",

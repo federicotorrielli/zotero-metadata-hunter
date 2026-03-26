@@ -1,30 +1,30 @@
 // Bootstrapped plugin entry point for Zotero 7/8
 // See: https://www.zotero.org/support/dev/zotero_7_for_developers
 
-var DOIFinder;
+var MetadataHunter;
 
 async function startup({ id, version, rootURI }) {
   await Zotero.initializationPromise;
   Services.scriptloader.loadSubScript(rootURI + "content/scripts/index.js");
-  DOIFinder = Zotero.DOIFinder;
-  await DOIFinder.startup({ id, version, rootURI });
+  MetadataHunter = Zotero.MetadataHunter;
+  await MetadataHunter.startup({ id, version, rootURI });
 }
 
 function shutdown(data, reason) {
-  if (DOIFinder) {
-    DOIFinder.shutdown();
-    DOIFinder = null;
+  if (MetadataHunter) {
+    MetadataHunter.shutdown();
+    MetadataHunter = null;
   }
-  delete Zotero.DOIFinder;
+  delete Zotero.MetadataHunter;
 }
 
 function install(data, reason) {}
 function uninstall(data, reason) {}
 
 function onMainWindowLoad({ window }) {
-  DOIFinder?.onMainWindowLoad(window);
+  MetadataHunter?.onMainWindowLoad(window);
 }
 
 function onMainWindowUnload({ window }) {
-  DOIFinder?.onMainWindowUnload(window);
+  MetadataHunter?.onMainWindowUnload(window);
 }
