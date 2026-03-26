@@ -13,7 +13,9 @@ export function registerWindowMenus(win: Window) {
     const menuitem = doc.createXULElement("menuitem");
     menuitem.id = `${config.addonRef}-tools-menu`;
     menuitem.setAttribute("label", getString("menu.findDOILibrary"));
-    menuitem.addEventListener("command", () => Zotero.DOIFinder.findDOIs());
+    menuitem.addEventListener("command", () =>
+      Zotero.MetadataHunter.findDOIs(),
+    );
     toolsMenu.appendChild(menuitem);
   }
 
@@ -22,7 +24,9 @@ export function registerWindowMenus(win: Window) {
     const menuitem = doc.createXULElement("menuitem");
     menuitem.id = `${config.addonRef}-item-menu`;
     menuitem.setAttribute("label", getString("menu.findDOI"));
-    menuitem.addEventListener("command", () => Zotero.DOIFinder.findDOIsForSelected());
+    menuitem.addEventListener("command", () =>
+      Zotero.MetadataHunter.findDOIsForSelected(),
+    );
 
     // Show the item only when at least one regular (non-note, non-attachment) item is selected
     const onShowing = () => {
@@ -44,7 +48,9 @@ export function unregisterWindowMenus(win: Window) {
 
   const listener = itemMenuListeners.get(win);
   if (listener) {
-    doc.getElementById("zotero-itemmenu")?.removeEventListener("popupshowing", listener);
+    doc
+      .getElementById("zotero-itemmenu")
+      ?.removeEventListener("popupshowing", listener);
     itemMenuListeners.delete(win);
   }
 }

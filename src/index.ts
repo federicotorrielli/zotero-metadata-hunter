@@ -21,16 +21,16 @@ class CancelToken {
 
 // ── Plugin namespace ───────────────────────────────────────────────────────────
 
-Zotero.DOIFinder = {
+Zotero.MetadataHunter = {
   async startup(_data: { id: string; version: string; rootURI: string }) {
-    Zotero.debug("DOI Finder: Startup");
+    Zotero.debug("Metadata Hunter: Startup");
     for (const win of Zotero.getMainWindows()) {
-      Zotero.DOIFinder.onMainWindowLoad(win);
+      Zotero.MetadataHunter.onMainWindowLoad(win);
     }
   },
 
   shutdown() {
-    Zotero.debug("DOI Finder: Shutdown");
+    Zotero.debug("Metadata Hunter: Shutdown");
     activeCancel?.cancel();
   },
 
@@ -177,7 +177,8 @@ function cleanTitleForQuery(title: string): string {
   // rely on their subtitle for distinctiveness — stripping them yields a generic phrase
   // that returns unrelated results from every API.
   const colonIdx = decoded.search(/\s*[:\u2014]/);
-  const fragment = colonIdx !== -1 ? decoded.slice(0, colonIdx).trim() : decoded;
+  const fragment =
+    colonIdx !== -1 ? decoded.slice(0, colonIdx).trim() : decoded;
   const wordCount = fragment.split(/\s+/).filter(Boolean).length;
   const noSubtitle = colonIdx !== -1 && wordCount >= 4 ? fragment : decoded;
 
@@ -263,12 +264,14 @@ async function findDOIFromCrossRef(
   const titleParam = `query.bibliographic=${encodeURIComponent(cleanTitleForQuery(title))}`;
 
   // Helper: run one CrossRef query and return the first title-matching result.
-  const queryCrossRef = async (extraParams: string[]): Promise<DOIResult | null> => {
+  const queryCrossRef = async (
+    extraParams: string[],
+  ): Promise<DOIResult | null> => {
     const params = [titleParam, ...extraParams].join("&");
     const url = `https://api.crossref.org/works?${params}&rows=10`;
     const response: any = await withTimeout(
       Zotero.HTTP.request("GET", url, {
-        headers: { "User-Agent": `Zotero DOI Finder/${version}` },
+        headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
       }),
       10_000,
     );
@@ -284,8 +287,10 @@ async function findDOIFromCrossRef(
   try {
     // First attempt: narrow query with author + year filter for precision.
     const narrowParams: string[] = [];
-    if (lastName) narrowParams.push(`query.author=${encodeURIComponent(lastName)}`);
-    if (year) narrowParams.push(`filter=from-pub-date:${year},until-pub-date:${year}`);
+    if (lastName)
+      narrowParams.push(`query.author=${encodeURIComponent(lastName)}`);
+    if (year)
+      narrowParams.push(`filter=from-pub-date:${year},until-pub-date:${year}`);
 
     const narrow = await queryCrossRef(narrowParams);
     if (narrow) return narrow;
@@ -295,7 +300,7 @@ async function findDOIFromCrossRef(
     // narrowed query found nothing we retry without author/year constraints.
     if (narrowParams.length > 0) return await queryCrossRef([]);
   } catch (e) {
-    Zotero.debug(`DOI Finder: CrossRef request failed: ${e}`);
+    Zotero.debug(`Metadata Hunter: CrossRef request failed: ${e}`);
   }
 
   return null;
@@ -320,7 +325,7 @@ async function findDOIFromDBLP(
   try {
     const response: any = await withTimeout(
       Zotero.HTTP.request("GET", url, {
-        headers: { "User-Agent": `Zotero DOI Finder/${version}` },
+        headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
       }),
       10_000,
     );
@@ -345,7 +350,7 @@ async function findDOIFromDBLP(
       }
     }
   } catch (e) {
-    Zotero.debug(`DOI Finder: DBLP request failed: ${e}`);
+    Zotero.debug(`Metadata Hunter: DBLP request failed: ${e}`);
   }
 
   return null;
@@ -369,7 +374,7 @@ async function findDOIFromArXiv(
   try {
     const response: any = await withTimeout(
       Zotero.HTTP.request("GET", url, {
-        headers: { "User-Agent": `Zotero DOI Finder/${version}` },
+        headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
       }),
       10_000,
     );
@@ -401,7 +406,7 @@ async function findDOIFromArXiv(
       }
     }
   } catch (e) {
-    Zotero.debug(`DOI Finder: arXiv request failed: ${e}`);
+    Zotero.debug(`Metadata Hunter: arXiv request failed: ${e}`);
   }
 
   return null;
@@ -420,7 +425,7 @@ async function findDOIFromSemanticScholar(
   try {
     const response: any = await withTimeout(
       Zotero.HTTP.request("GET", url, {
-        headers: { "User-Agent": `Zotero DOI Finder/${version}` },
+        headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
       }),
       10_000,
     );
@@ -433,7 +438,7 @@ async function findDOIFromSemanticScholar(
 
     return { doi, abstract: paper.abstract ?? null };
   } catch (e) {
-    Zotero.debug(`DOI Finder: Semantic Scholar title search failed: ${e}`);
+    Zotero.debug(`Metadata Hunter: Semantic Scholar title search failed: ${e}`);
     return null;
   }
 }
@@ -463,11 +468,11 @@ async function findAbstractFromSemanticScholar(
     const response = await Zotero.HTTP.request(
       "GET",
       `https://api.semanticscholar.org/graph/v1/paper/DOI:${doi}?fields=abstract`,
-      { headers: { "User-Agent": `Zotero DOI Finder/${version}` } },
+      { headers: { "User-Agent": `Zotero Metadata Hunter/${version}` } },
     );
     return JSON.parse(response.responseText).abstract ?? null;
   } catch (e) {
-    Zotero.debug(`DOI Finder: Semantic Scholar failed: ${e}`);
+    Zotero.debug(`Metadata Hunter: Semantic Scholar failed: ${e}`);
     return null;
   }
 }
@@ -491,7 +496,7 @@ async function findAbstractFromPubMed(doi: string): Promise<string | null> {
     );
     return xmlDoc.querySelector("AbstractText")?.textContent ?? null;
   } catch (e) {
-    Zotero.debug(`DOI Finder: PubMed failed: ${e}`);
+    Zotero.debug(`Metadata Hunter: PubMed failed: ${e}`);
     return null;
   }
 }
@@ -501,14 +506,14 @@ async function findAbstractFromOpenAlex(doi: string): Promise<string | null> {
     const response = await Zotero.HTTP.request(
       "GET",
       `https://api.openalex.org/works/doi:${doi}`,
-      { headers: { "User-Agent": `Zotero DOI Finder/${version}` } },
+      { headers: { "User-Agent": `Zotero Metadata Hunter/${version}` } },
     );
     const data = JSON.parse(response.responseText);
     if (data.abstract_inverted_index) {
       return reconstructAbstract(data.abstract_inverted_index);
     }
   } catch (e) {
-    Zotero.debug(`DOI Finder: OpenAlex failed: ${e}`);
+    Zotero.debug(`Metadata Hunter: OpenAlex failed: ${e}`);
   }
   return null;
 }
@@ -671,7 +676,9 @@ async function processItems(
             }
           }
         } catch (e) {
-          Zotero.debug(`DOI Finder: Error processing item ${item.id}: ${e}`);
+          Zotero.debug(
+            `Metadata Hunter: Error processing item ${item.id}: ${e}`,
+          );
           result.hadApiErrors = true;
         }
 

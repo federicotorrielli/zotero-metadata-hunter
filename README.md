@@ -1,4 +1,4 @@
-# Zotero DOI Finder
+# Zotero Metadata Hunter
 
 A Zotero plugin that automatically finds and adds missing DOIs and abstracts to your references.
 
@@ -13,7 +13,7 @@ A Zotero plugin that automatically finds and adds missing DOIs and abstracts to 
 
 ## Installation
 
-1. Download the latest `.xpi` from the [Releases](https://github.com/federicotorrielli/zotero-doi-finder/releases) page
+1. Download the latest `.xpi` from the [Releases](https://github.com/federicotorrielli/zotero-metadata-hunter/releases) page
 2. In Zotero: **Tools → Add-ons → ⚙ → Install Add-on From File…**
 3. Select the `.xpi` file and restart if prompted
 
@@ -53,8 +53,8 @@ Items that already have both a DOI and an abstract are skipped. To cancel a runn
 ### Setup
 
 ```bash
-git clone https://github.com/federicotorrielli/zotero-doi-finder.git
-cd zotero-doi-finder
+git clone https://github.com/federicotorrielli/zotero-metadata-hunter.git
+cd zotero-metadata-hunter
 pnpm install
 pnpm run build    # production XPI
 pnpm run start    # dev mode with live reload into Zotero

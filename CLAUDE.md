@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Zotero DOI Finder is a Zotero plugin (addon ID: `doifinder@zotero.org`) that automatically finds missing DOIs and abstracts for items in a Zotero library. It queries CrossRef, DBLP, Semantic Scholar, arXiv, PubMed, and OpenAlex.
+Zotero Metadata Hunter is a Zotero plugin (addon ID: `metadatahunter@zotero.org`) that automatically finds missing DOIs and abstracts for items in a Zotero library. It queries CrossRef, DBLP, Semantic Scholar, arXiv, PubMed, and OpenAlex.
 
 ## Commands
 
@@ -34,11 +34,11 @@ The CI reads the version from `package.json`. Always bump it before tagging — 
 
 The plugin is TypeScript bundled via esbuild into an IIFE (Firefox 128 target). The XPI must have `bootstrap.js` and `manifest.json` at its root.
 
-**Entry point**: `addon/bootstrap.js` — loaded by Zotero, waits for `Zotero.initializationPromise`, loads the compiled bundle (`content/scripts/index.js`) via `Services.scriptloader.loadSubScript`, and delegates all lifecycle calls (`startup`, `shutdown`, `onMainWindowLoad`, `onMainWindowUnload`) to `Zotero.DOIFinder.*`.
+**Entry point**: `addon/bootstrap.js` — loaded by Zotero, waits for `Zotero.initializationPromise`, loads the compiled bundle (`content/scripts/index.js`) via `Services.scriptloader.loadSubScript`, and delegates all lifecycle calls (`startup`, `shutdown`, `onMainWindowLoad`, `onMainWindowUnload`) to `Zotero.MetadataHunter.*`.
 
 **Core logic** (`src/index.ts`):
 
-- Sets up `Zotero.DOIFinder` on the global namespace with lifecycle methods; `bootstrap.js` deletes it on shutdown
+- Sets up `Zotero.MetadataHunter` on the global namespace with lifecycle methods; `bootstrap.js` deletes it on shutdown
 - `onMainWindowLoad` registers menus, toolbar button, and keyboard shortcut (Ctrl/Cmd+Alt+D) per window; `onMainWindowUnload` removes them (required to avoid memory leaks)
 - `findDOIForItem()` tries four sources in order: **CrossRef → DBLP → Semantic Scholar → arXiv**
 - `findAbstractForItem()` races all three abstract sources simultaneously with `Promise.any`: **Semantic Scholar → PubMed → OpenAlex**
