@@ -759,6 +759,15 @@ const PUBLISHED_CROSSREF_TYPES = new Set([
   "book-chapter",
 ]);
 
+const PUBLISHED_ITEM_TYPES = new Set([
+  "journalArticle",
+  "conferencePaper",
+  "bookSection",
+  "book",
+  "thesis",
+  "report",
+]);
+
 const PREPRINT_VENUES = new Set([
   "arxiv",
   "corr",
@@ -772,11 +781,18 @@ const PREPRINT_VENUES = new Set([
 
 function extractArxivId(item: any): string | null {
   const url: string = item.getField("url") ?? "";
-  const urlMatch = url.match(/arxiv\.org\/abs\/(\d{4}\.\d{4,5})/);
-  if (urlMatch) return urlMatch[1];
+  // Direct arxiv.org abstract URL
+  const urlAbsMatch = url.match(/arxiv\.org\/abs\/(\d{4}\.\d{4,5})/);
+  if (urlAbsMatch) return urlAbsMatch[1];
+  // doi.org redirect to arXiv DOI (e.g. https://doi.org/10.48550/arXiv.2502.01534)
+  const urlDoiMatch = url.match(
+    /doi\.org\/10\.48550\/arxiv\.(\d{4}\.\d{4,5})/i,
+  );
+  if (urlDoiMatch) return urlDoiMatch[1];
 
   const doi: string = item.getField("DOI") ?? "";
-  const doiMatch = doi.match(/10\.48550\/arXiv\.(\d{4}\.\d{4,5})/);
+  // Case-insensitive: DOIs may be stored as 10.48550/ARXIV.xxx or 10.48550/arXiv.xxx
+  const doiMatch = doi.match(/10\.48550\/arxiv\.(\d{4}\.\d{4,5})/i);
   if (doiMatch) return doiMatch[1];
 
   const extra: string = item.getField("extra") ?? "";
@@ -789,15 +805,18 @@ function extractArxivId(item: any): string | null {
 function isPreprint(item: any): boolean {
   if (!item.isRegularItem()) return false;
   if (item.itemType === "preprint") return true;
-  const url: string = item.getField("url") ?? "";
-  if (url.includes("arxiv.org")) return true;
-  // Items imported from DBLP as CoRR entries (arXiv CS preprints)
+  // CoRR is DBLP's label for arXiv — always a preprint regardless of item type
+  // (Zotero stores CoRR entries as journalArticle, so this must come before the type gate)
   const pub: string = (
     item.getField("publicationTitle") ??
     item.getField("proceedingsTitle") ??
     ""
   ).toLowerCase();
   if (pub === "corr") return true;
+  // Published item types are never preprints, even if they retain an arXiv DOI/URL
+  if (PUBLISHED_ITEM_TYPES.has(item.itemType)) return false;
+  const url: string = item.getField("url") ?? "";
+  if (url.includes("arxiv.org")) return true;
   return extractArxivId(item) !== null;
 }
 
@@ -805,8 +824,13 @@ function identifyPreprints(items: any[]): any[] {
   return items.filter(isPreprint);
 }
 
+// A published reference is either a DOI or a venue URL (e.g. OpenReview, PMLR).
+// Venues like ICLR publish via OpenReview and never assign DOIs, so URL is the
+// only way to create a properly-sourced item for them.
+type PublishedRef = { doi: string } | { url: string };
+
 function isPublishedDOI(doi: string): boolean {
-  return !doi.startsWith("10.48550/arXiv.");
+  return !doi.toLowerCase().startsWith("10.48550/arxiv.");
 }
 
 function isPublishedVenue(venue: string): boolean {
@@ -906,10 +930,10 @@ async function findPublishedDOIFromCrossRef(
   return null;
 }
 
-async function findPublishedDOIFromDBLP(
+async function findPublishedRefFromDBLP(
   item: any,
   title: string,
-): Promise<string | null> {
+): Promise<PublishedRef | null> {
   const queryWords = cleanTitleForQuery(title).replace(/\s+/g, " ").trim();
   const creators = item.getCreators();
   const authorSuffix =
@@ -938,12 +962,25 @@ async function findPublishedDOIFromDBLP(
       if (!info || !isTitleMatch(title, info.title)) continue;
       if (!isPublishedVenue(info.venue ?? "")) continue;
 
-      if (info.doi && isPublishedDOI(info.doi)) return info.doi as string;
+      if (info.doi && isPublishedDOI(info.doi))
+        return { doi: info.doi as string };
 
-      if (info.ee) {
-        const ee: string = Array.isArray(info.ee) ? info.ee[0] : info.ee;
+      // Normalise ee to array and scan all entries
+      const ees: string[] = info.ee
+        ? Array.isArray(info.ee)
+          ? info.ee
+          : [info.ee]
+        : [];
+
+      // Prefer a DOI embedded in an ee URL
+      for (const ee of ees) {
         const match = ee.match(/doi\.org\/(.+)$/);
-        if (match && isPublishedDOI(match[1])) return match[1];
+        if (match && isPublishedDOI(match[1])) return { doi: match[1] };
+      }
+
+      // Fall back to the first non-arXiv venue URL (e.g. OpenReview, PMLR)
+      for (const ee of ees) {
+        if (!ee.includes("arxiv.org")) return { url: ee };
       }
     }
   } catch (e) {
@@ -952,14 +989,14 @@ async function findPublishedDOIFromDBLP(
   return null;
 }
 
-async function findPublishedDOI(item: any): Promise<string | null> {
+async function findPublishedDOI(item: any): Promise<PublishedRef | null> {
   const title = item.getField("title");
   if (!title) return null;
 
   const arxivId = extractArxivId(item);
   if (arxivId) {
     const doi = await findPublishedDOIFromArxivById(arxivId);
-    if (doi) return doi;
+    if (doi) return { doi };
   }
 
   // Race all three fallback sources — first non-null result wins,
@@ -967,13 +1004,23 @@ async function findPublishedDOI(item: any): Promise<string | null> {
   try {
     return await Promise.any([
       withNullAsReject(
-        withTimeout(findPublishedDOIFromSemanticScholar(title), 10_000),
+        withTimeout(
+          findPublishedDOIFromSemanticScholar(title).then(
+            (doi): PublishedRef | null => (doi ? { doi } : null),
+          ),
+          10_000,
+        ),
       ),
       withNullAsReject(
-        withTimeout(findPublishedDOIFromCrossRef(item, title), 10_000),
+        withTimeout(
+          findPublishedDOIFromCrossRef(item, title).then(
+            (doi): PublishedRef | null => (doi ? { doi } : null),
+          ),
+          10_000,
+        ),
       ),
       withNullAsReject(
-        withTimeout(findPublishedDOIFromDBLP(item, title), 10_000),
+        withTimeout(findPublishedRefFromDBLP(item, title), 10_000),
       ),
     ]);
   } catch {
@@ -1004,6 +1051,45 @@ async function createItemFromDOI(
     );
     return false;
   }
+}
+
+// Use Zotero's web translator — same mechanism as dragging a URL into Zotero.
+// Handles venues like ICLR that publish via OpenReview without assigning DOIs.
+async function createItemFromURL(
+  url: string,
+  sourceItem: any,
+): Promise<boolean> {
+  try {
+    let created = false;
+    await Zotero.HTTP.processDocuments([url], async (doc: any) => {
+      const translate = new Zotero.Translate.Web();
+      translate.setDocument(doc);
+      const translators = await translate.getTranslators();
+      if (!translators.length) return;
+      translate.setTranslator(translators);
+      const newItems = await translate.translate({
+        libraryID: sourceItem.libraryID,
+        collections: sourceItem.getCollections(),
+        saveAttachments: false,
+      });
+      created = newItems && newItems.length > 0;
+    });
+    return created;
+  } catch (e) {
+    Zotero.debug(
+      `Metadata Hunter: Failed to create item from URL ${url}: ${e}`,
+    );
+    return false;
+  }
+}
+
+async function createItemFromPublished(
+  ref: PublishedRef,
+  sourceItem: any,
+): Promise<boolean> {
+  return "doi" in ref
+    ? createItemFromDOI(ref.doi, sourceItem)
+    : createItemFromURL(ref.url, sourceItem);
 }
 
 interface PreprintResult {
@@ -1060,9 +1146,9 @@ async function processPreprints(
       batch.map(async (item) => {
         if (cancel.requested) return;
         try {
-          const doi = await findPublishedDOI(item);
-          if (doi) {
-            const created = await createItemFromDOI(doi, item);
+          const ref = await findPublishedDOI(item);
+          if (ref) {
+            const created = await createItemFromPublished(ref, item);
             if (created) {
               item.deleted = true;
               await item.saveTx();
