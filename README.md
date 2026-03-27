@@ -1,14 +1,15 @@
 # Zotero Metadata Hunter
 
-A Zotero plugin that automatically finds and adds missing DOIs and abstracts to your references.
+A Zotero plugin that automatically finds and adds missing DOIs and abstracts to your references, and checks whether preprints in your library have been published at a conference or journal.
 
 ## Features
 
 - **4 DOI sources**: CrossRef → DBLP → Semantic Scholar → arXiv, tried in order
 - **3 abstract sources**: Semantic Scholar, PubMed, and OpenAlex raced in parallel — fastest wins
+- **Preprint upgrading**: detects arXiv preprints and checks if a published version exists; creates a fully-populated item and moves the preprint to trash
 - **Parallel processing**: items processed in batches of 5 (~10× faster than serial)
 - **Smart title matching**: Levenshtein similarity with length-gating and subtitle-aware query cleaning
-- **Cancellable**: press `Ctrl/Cmd+Alt+D` or click the toolbar button again to stop mid-run
+- **Cancellable**: press `Ctrl/Cmd+Alt+D` (DOI finding) or `Ctrl/Cmd+Alt+P` (preprint check) to stop mid-run
 - **Live progress**: headline shows a running tally and ETA while processing
 
 ## Installation
@@ -21,12 +22,28 @@ A Zotero plugin that automatically finds and adds missing DOIs and abstracts to 
 
 | Trigger | Scope |
 |---|---|
+**Find DOIs & Abstracts**
+
+| Trigger | Scope |
+|---|---|
 | Right-click → **Find DOI and Abstract** | Selected items only |
 | **Tools → Find DOIs and Abstracts in Library** | Current collection or full library |
 | Toolbar button | Current collection or full library |
 | `Ctrl/Cmd + Alt + D` | Current collection or full library |
 
-Items that already have both a DOI and an abstract are skipped. To cancel a running operation, press `Ctrl/Cmd+Alt+D` again or click the toolbar button — it toggles.
+Items that already have both a DOI and an abstract are skipped.
+
+**Find Published Versions of Preprints**
+
+| Trigger | Scope |
+|---|---|
+| Right-click → **Check for Published Version** | Selected preprints only |
+| **Tools → Find Published Versions of Preprints** | Current collection or full library |
+| `Ctrl/Cmd + Alt + P` | Current collection or full library |
+
+Detects preprints by item type, arXiv URL, arXiv DOI (`10.48550/arXiv.*`), or `arXiv:` in the Extra field. When a published version is found, a new fully-populated item is created (via the same mechanism as *Add Item by Identifier*) and the original preprint is moved to trash.
+
+To cancel any running operation, use the same shortcut again or click the toolbar button — it toggles.
 
 ## How It Works
 
@@ -40,6 +57,11 @@ Items that already have both a DOI and an abstract are skipped. To cancel a runn
 **Abstract finding** (all three sources queried simultaneously; first non-null result wins):
 
 - Semantic Scholar (by DOI), PubMed (esearch + efetch), OpenAlex
+
+**Preprint published-version lookup** (sources tried in order):
+
+1. **arXiv direct ID** — fetches the specific arXiv entry and extracts `<arxiv:doi>` (the journal DOI the author reported); most authoritative when present
+2. **Semantic Scholar, CrossRef, DBLP** — raced in parallel with `Promise.any`; result must have a non-arXiv DOI and a non-preprint venue to count
 
 **Title matching**: candidates are verified with fuzzy matching (Levenshtein similarity ≥ 0.85), gated by a ≤15% length-difference check that applies to both substring and similarity checks.
 
