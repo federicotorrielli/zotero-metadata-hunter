@@ -48,17 +48,20 @@ The plugin is TypeScript bundled via esbuild into an IIFE (Firefox 128 target). 
 - All HTTP calls use `Zotero.HTTP.request()` (async, respects Zotero proxy settings)
 
 **DOI source details** (all in `src/index.ts`):
+
 - `findDOIFromCrossRef`: narrow query (title + author + year), falls back to title-only if no match — prevents author substring false positives (e.g. "Kirchenbauer" matching "Müller-Kirchenbauer")
 - `findDOIFromDBLP`: title + author concatenated into DBLP's full-text index; handles `hit` being object or array
 - `findDOIFromSemanticScholar`: uses `/paper/search/match` with title only (no author — extra terms break this endpoint's scoring); fetches `externalIds,title,abstract` so a single call can provide both DOI and abstract, skipping the abstract lookup when SS wins
 - `findDOIFromArXiv`: extracts `<arxiv:doi>` (namespace `http://arxiv.org/schemas/atom`) or `<link title="doi">` href from Atom XML
 
 **Title matching** (`isTitleMatch`):
+
 - Normalises both strings (lowercase, strip punctuation)
 - Length gate applied first to ALL checks: if `(longer − shorter) / longer > 0.15`, reject immediately — this prevents short strings (e.g. "Large Language Models") from falsely matching longer ones via substring
 - Then: exact → substring → Levenshtein similarity > 0.85
 
 **Query cleaning** (`cleanTitleForQuery`):
+
 - Strips HTML entities, truncates to 100 chars
 - Only strips subtitle (after `:` or `—`) when the pre-colon fragment has ≥ 4 words — short main titles like "BERT: …" or "Machine generated text: …" need their subtitle to produce a distinctive query
 
@@ -67,6 +70,7 @@ The plugin is TypeScript bundled via esbuild into an IIFE (Firefox 128 target). 
 **Published venue validation**: results are only accepted if the DOI doesn't start with `10.48550/arXiv.` and the venue is not in the `PREPRINT_VENUES` blocklist (arXiv, CoRR, SSRN, bioRxiv, medRxiv, etc.). CrossRef results must also have type `journal-article`, `proceedings-article`, or `book-chapter` (checked via `PUBLISHED_CROSSREF_TYPES` Set).
 
 **UI layer**:
+
 - `src/modules/menu.ts`: per-window menu registration; Tools menu has two items (DOI finding + preprint check); right-click menu has two items with separate visibility rules (`isRegularItem` vs `isPreprint`); DOM refs closed over at registration to avoid per-open getElementById lookups; single `popupshowing` listener per window cleaned up in `unregisterWindowMenus`
 - `src/utils/locale.ts`: hardcoded English strings with `replaceAll`-based parameter interpolation
 - Toolbar button and both shortcuts toggle: if processing → cancel, otherwise → start; `syncAllToolbarButtons()` updates label/tooltip across all open windows

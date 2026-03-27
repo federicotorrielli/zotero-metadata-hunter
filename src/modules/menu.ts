@@ -5,15 +5,19 @@ declare const Zotero: any;
 
 const itemMenuListeners = new WeakMap<Window, () => void>();
 
-export function registerWindowMenus(win: Window) {
+export function registerWindowMenus(win: Window, rootURI: string) {
   const doc = (win as any).document;
+  const metadataIcon = rootURI + "icons/find-metadata.svg";
+  const publishedIcon = rootURI + "icons/find-published.svg";
 
   const toolsMenu = doc.getElementById("menu_ToolsPopup");
   if (toolsMenu) {
     if (!doc.getElementById(`${config.addonRef}-tools-menu`)) {
       const menuitem = doc.createXULElement("menuitem");
       menuitem.id = `${config.addonRef}-tools-menu`;
+      menuitem.className = "menuitem-iconic";
       menuitem.setAttribute("label", getString("menu.findDOILibrary"));
+      menuitem.setAttribute("image", metadataIcon);
       menuitem.addEventListener("command", () =>
         Zotero.MetadataHunter.findDOIs(),
       );
@@ -23,7 +27,9 @@ export function registerWindowMenus(win: Window) {
     if (!doc.getElementById(`${config.addonRef}-tools-menu-preprint`)) {
       const menuitem = doc.createXULElement("menuitem");
       menuitem.id = `${config.addonRef}-tools-menu-preprint`;
+      menuitem.className = "menuitem-iconic";
       menuitem.setAttribute("label", getString("preprint.menu.library"));
+      menuitem.setAttribute("image", publishedIcon);
       menuitem.addEventListener("command", () =>
         Zotero.MetadataHunter.findPublishedVersions(),
       );
@@ -37,7 +43,9 @@ export function registerWindowMenus(win: Window) {
     if (!doiItem) {
       doiItem = doc.createXULElement("menuitem");
       doiItem.id = `${config.addonRef}-item-menu`;
+      doiItem.className = "menuitem-iconic";
       doiItem.setAttribute("label", getString("menu.findDOI"));
+      doiItem.setAttribute("image", metadataIcon);
       doiItem.addEventListener("command", () =>
         Zotero.MetadataHunter.findDOIsForSelected(),
       );
@@ -50,7 +58,9 @@ export function registerWindowMenus(win: Window) {
     if (!preprintItem) {
       preprintItem = doc.createXULElement("menuitem");
       preprintItem.id = `${config.addonRef}-item-menu-preprint`;
+      preprintItem.className = "menuitem-iconic";
       preprintItem.setAttribute("label", getString("preprint.menu.selected"));
+      preprintItem.setAttribute("image", publishedIcon);
       preprintItem.addEventListener("command", () =>
         Zotero.MetadataHunter.findPublishedVersionsForSelected(),
       );
