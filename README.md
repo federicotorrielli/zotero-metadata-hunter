@@ -21,27 +21,28 @@ A Zotero plugin that automatically finds and adds missing DOIs and abstracts to 
 ## Usage
 
 | Trigger | Scope |
-|---|---|
+| ------- | ----- |
+
 **Find DOIs & Abstracts**
 
-| Trigger | Scope |
-|---|---|
-| Right-click → **Find DOI and Abstract** | Selected items only |
+| Trigger                                        | Scope                              |
+| ---------------------------------------------- | ---------------------------------- |
+| Right-click → **Find DOI and Abstract**        | Selected items only                |
 | **Tools → Find DOIs and Abstracts in Library** | Current collection or full library |
-| Toolbar button | Current collection or full library |
-| `Ctrl/Cmd + Alt + D` | Current collection or full library |
+| Toolbar button                                 | Current collection or full library |
+| `Ctrl/Cmd + Alt + D`                           | Current collection or full library |
 
 Items that already have both a DOI and an abstract are skipped.
 
 **Find Published Versions of Preprints**
 
-| Trigger | Scope |
-|---|---|
-| Right-click → **Check for Published Version** | Selected preprints only |
+| Trigger                                          | Scope                              |
+| ------------------------------------------------ | ---------------------------------- |
+| Right-click → **Check for Published Version**    | Selected preprints only            |
 | **Tools → Find Published Versions of Preprints** | Current collection or full library |
-| `Ctrl/Cmd + Alt + P` | Current collection or full library |
+| `Ctrl/Cmd + Alt + P`                             | Current collection or full library |
 
-Detects preprints by item type, arXiv URL, arXiv DOI (`10.48550/arXiv.*`), or `arXiv:` in the Extra field. When a published version is found, a new fully-populated item is created (via the same mechanism as *Add Item by Identifier*) and the original preprint is moved to trash.
+Detects preprints by item type, arXiv URL, arXiv DOI (`10.48550/arXiv.*`), or `arXiv:` in the Extra field. When a published version is found, a new fully-populated item is created (via the same mechanism as _Add Item by Identifier_) and the original preprint is moved to trash.
 
 To cancel any running operation, use the same shortcut again or click the toolbar button — it toggles.
 
@@ -51,7 +52,7 @@ To cancel any running operation, use the same shortcut again or click the toolba
 
 1. **CrossRef** — title + author + year; falls back to title-only if the narrow query finds nothing
 2. **DBLP** — strong coverage of CS conference and journal papers
-3. **Semantic Scholar** — `/paper/search/match` endpoint; returns DOI *and* abstract in one call, skipping the abstract lookup when it wins
+3. **Semantic Scholar** — `/paper/search/match` endpoint; returns DOI _and_ abstract in one call, skipping the abstract lookup when it wins
 4. **arXiv** — extracts the journal DOI from `<arxiv:doi>` when the author has submitted one
 
 **Abstract finding** (all three sources queried simultaneously; first non-null result wins):

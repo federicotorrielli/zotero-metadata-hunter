@@ -9,6 +9,7 @@ declare const Services: any;
 
 const windowKeyHandlers = new WeakMap<Window, (e: KeyboardEvent) => void>();
 let activeCancel: CancelToken | null = null;
+let pluginRootURI = "";
 
 // ── Cancel token ───────────────────────────────────────────────────────────────
 
@@ -22,8 +23,9 @@ class CancelToken {
 // ── Plugin namespace ───────────────────────────────────────────────────────────
 
 Zotero.MetadataHunter = {
-  async startup(_data: { id: string; version: string; rootURI: string }) {
+  async startup(data: { id: string; version: string; rootURI: string }) {
     Zotero.debug("Metadata Hunter: Startup");
+    pluginRootURI = data.rootURI;
     for (const win of Zotero.getMainWindows()) {
       Zotero.MetadataHunter.onMainWindowLoad(win);
     }
@@ -35,7 +37,7 @@ Zotero.MetadataHunter = {
   },
 
   onMainWindowLoad(win: Window) {
-    registerWindowMenus(win);
+    registerWindowMenus(win, pluginRootURI);
     setupWindowToolbar(win);
     setupWindowKeyShortcut(win);
   },
@@ -67,7 +69,7 @@ function setupWindowToolbar(win: Window) {
   const btn = doc.createXULElement("toolbarbutton");
   btn.id = `${config.addonRef}-button`;
   btn.className = "zotero-tb-button";
-  btn.setAttribute("image", "chrome://zotero/skin/16/universal/book.svg");
+  btn.setAttribute("image", pluginRootURI + "icons/find-metadata.svg");
   btn.addEventListener("command", () => {
     if (activeCancel) {
       activeCancel.cancel();
