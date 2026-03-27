@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Zotero Metadata Hunter is a Zotero plugin (addon ID: `metadatahunter@zotero.org`) that automatically finds missing DOIs and abstracts for items in a Zotero library. It queries CrossRef, DBLP, Semantic Scholar, arXiv, PubMed, and OpenAlex.
+Zotero Metadata Hunter is a Zotero plugin (addon ID: `metadatahunter@zotero.org`) that automatically finds missing DOIs and abstracts for items in a Zotero library, and checks whether preprints have a published conference/journal version. It queries CrossRef, DBLP, Semantic Scholar, arXiv, PubMed, and OpenAlex.
 
 ## Commands
 
@@ -39,10 +39,12 @@ The plugin is TypeScript bundled via esbuild into an IIFE (Firefox 128 target). 
 **Core logic** (`src/index.ts`):
 
 - Sets up `Zotero.MetadataHunter` on the global namespace with lifecycle methods; `bootstrap.js` deletes it on shutdown
-- `onMainWindowLoad` registers menus, toolbar button, and keyboard shortcut (Ctrl/Cmd+Alt+D) per window; `onMainWindowUnload` removes them (required to avoid memory leaks)
+- `onMainWindowLoad` registers menus, toolbar button, and keyboard shortcuts (Ctrl/Cmd+Alt+D and Ctrl/Cmd+Alt+P) per window; `onMainWindowUnload` removes them (required to avoid memory leaks)
 - `findDOIForItem()` tries four sources in order: **CrossRef → DBLP → Semantic Scholar → arXiv**
 - `findAbstractForItem()` races all three abstract sources simultaneously with `Promise.any`: **Semantic Scholar → PubMed → OpenAlex**
 - `processItems()` runs items in parallel batches of 5 with a `CancelToken`; a 300ms minimum inter-batch delay rate-limits API calls
+- `findPublishedDOI()` checks for a published version of a preprint: arXiv direct ID first, then Semantic Scholar + CrossRef + DBLP raced with `Promise.any`
+- `processPreprints()` same batch/cancel/progress pattern as `processItems()`; on success creates a new item via `Zotero.Translate.Search` and trashes the original preprint
 - All HTTP calls use `Zotero.HTTP.request()` (async, respects Zotero proxy settings)
 
 **DOI source details** (all in `src/index.ts`):
@@ -60,10 +62,14 @@ The plugin is TypeScript bundled via esbuild into an IIFE (Firefox 128 target). 
 - Strips HTML entities, truncates to 100 chars
 - Only strips subtitle (after `:` or `—`) when the pre-colon fragment has ≥ 4 words — short main titles like "BERT: …" or "Machine generated text: …" need their subtitle to produce a distinctive query
 
+**Preprint detection** (`isPreprint`): item type `preprint`, URL containing `arxiv.org`, DOI starting with `10.48550/arXiv.`, or `arXiv:` in the Extra field. `extractArxivId()` parses the ID from those same fields and is reused by both `isPreprint` and `findPublishedDOI`.
+
+**Published venue validation**: results are only accepted if the DOI doesn't start with `10.48550/arXiv.` and the venue is not in the `PREPRINT_VENUES` blocklist (arXiv, CoRR, SSRN, bioRxiv, medRxiv, etc.). CrossRef results must also have type `journal-article`, `proceedings-article`, or `book-chapter` (checked via `PUBLISHED_CROSSREF_TYPES` Set).
+
 **UI layer**:
-- `src/modules/menu.ts`: per-window menu registration with `popupshowing` listener that hides the right-click item when no regular item is selected; listener cleaned up in `unregisterWindowMenus`
+- `src/modules/menu.ts`: per-window menu registration; Tools menu has two items (DOI finding + preprint check); right-click menu has two items with separate visibility rules (`isRegularItem` vs `isPreprint`); DOM refs closed over at registration to avoid per-open getElementById lookups; single `popupshowing` listener per window cleaned up in `unregisterWindowMenus`
 - `src/utils/locale.ts`: hardcoded English strings with `replaceAll`-based parameter interpolation
-- Toolbar button and Ctrl/Cmd+Alt+D both toggle: if processing → cancel, otherwise → start; button label/tooltip updates via `syncAllToolbarButtons()` across all open windows
+- Toolbar button and both shortcuts toggle: if processing → cancel, otherwise → start; `syncAllToolbarButtons()` updates label/tooltip across all open windows
 
 **Build pipeline**: `scripts/build.mjs` delegates to `scripts/zotero-cmd.mjs`, which cleans output, copies `addon/` template (substituting `__version__` etc.), runs esbuild, then zips to `.xpi`.
 
