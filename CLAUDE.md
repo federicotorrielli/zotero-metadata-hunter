@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Zotero Metadata Hunter is a Zotero plugin (addon ID: `metadatahunter@zotero.org`) that automatically finds missing DOIs and abstracts for items in a Zotero library, and checks whether preprints have a published conference/journal version. It queries CrossRef, DBLP, Semantic Scholar, arXiv, PubMed, and OpenAlex.
+Zotero Metadata Hunter is a Zotero plugin (addon ID: `metadatahunter@federicotorrielli.github.io`) that automatically finds missing DOIs and abstracts for items in a Zotero library, and checks whether preprints have a published conference/journal version. It queries CrossRef, DBLP, Semantic Scholar, arXiv, PubMed, and OpenAlex.
 
 ## Commands
 
