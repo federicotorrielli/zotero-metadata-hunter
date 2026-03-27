@@ -52,6 +52,9 @@ Zotero.MetadataHunter = {
 
   findDOIs,
   findDOIsForSelected,
+  findPublishedVersions,
+  findPublishedVersionsForSelected,
+  isPreprint,
 };
 
 // ── Window UI ──────────────────────────────────────────────────────────────────
@@ -104,12 +107,22 @@ function syncAllToolbarButtons() {
 
 function setupWindowKeyShortcut(win: Window) {
   const handler = (e: KeyboardEvent) => {
-    if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === "d") {
+    if (!(e.ctrlKey || e.metaKey) || !e.altKey) return;
+
+    const key = e.key.toLowerCase();
+    if (key === "d") {
       e.preventDefault();
       if (activeCancel) {
         activeCancel.cancel();
       } else {
         findDOIs();
+      }
+    } else if (key === "p") {
+      e.preventDefault();
+      if (activeCancel) {
+        activeCancel.cancel();
+      } else {
+        findPublishedVersions();
       }
     }
   };
@@ -356,6 +369,23 @@ async function findDOIFromDBLP(
   return null;
 }
 
+// Extracts a DOI from a single arXiv Atom <entry> element.
+// Tries <arxiv:doi> first, then falls back to <link title="doi"> href.
+function extractDoiFromArxivEntry(entry: Element): string | null {
+  const doiEl = entry.getElementsByTagNameNS(
+    "http://arxiv.org/schemas/atom",
+    "doi",
+  )[0];
+  if (doiEl?.textContent?.trim()) return doiEl.textContent.trim();
+
+  for (const link of entry.querySelectorAll('link[title="doi"]')) {
+    const href = link.getAttribute("href") ?? "";
+    const match = href.match(/doi\.org\/(.+)$/);
+    if (match) return match[1];
+  }
+  return null;
+}
+
 // arXiv stores the published journal DOI in <arxiv:doi> when the author provided one.
 // Many preprints won't have this, but it covers papers that are on arXiv AND published.
 async function findDOIFromArXiv(
@@ -390,20 +420,8 @@ async function findDOIFromArXiv(
         .replace(/\s+/g, " ");
       if (!entryTitle || !isTitleMatch(title, entryTitle)) continue;
 
-      // <arxiv:doi> element (namespace: http://arxiv.org/schemas/atom)
-      const doiEl = entry.getElementsByTagNameNS(
-        "http://arxiv.org/schemas/atom",
-        "doi",
-      )[0];
-      if (doiEl?.textContent?.trim())
-        return { doi: doiEl.textContent.trim(), abstract: null };
-
-      // Fallback: <link rel="related" title="doi" href="https://dx.doi.org/10.xxx/yyy"/>
-      for (const link of entry.querySelectorAll('link[title="doi"]')) {
-        const href = link.getAttribute("href") ?? "";
-        const match = href.match(/doi\.org\/(.+)$/);
-        if (match) return { doi: match[1], abstract: null };
-      }
+      const doi = extractDoiFromArxivEntry(entry);
+      if (doi) return { doi, abstract: null };
     }
   } catch (e) {
     Zotero.debug(`Metadata Hunter: arXiv request failed: ${e}`);
@@ -730,6 +748,423 @@ function buildResultMessage(r: ProcessResult): string {
 
   if (r.hadApiErrors) msg += getString("findDOI.apiWarning");
   return msg;
+}
+
+// ── Preprint detection & published version finding ──────────────────────────────
+
+// Known preprint server venues to exclude from "published" results.
+const PUBLISHED_CROSSREF_TYPES = new Set([
+  "journal-article",
+  "proceedings-article",
+  "book-chapter",
+]);
+
+const PREPRINT_VENUES = new Set([
+  "arxiv",
+  "corr",
+  "ssrn",
+  "biorxiv",
+  "medrxiv",
+  "preprints.org",
+  "research square",
+  "techrxiv",
+]);
+
+function extractArxivId(item: any): string | null {
+  const url: string = item.getField("url") ?? "";
+  const urlMatch = url.match(/arxiv\.org\/abs\/(\d{4}\.\d{4,5})/);
+  if (urlMatch) return urlMatch[1];
+
+  const doi: string = item.getField("DOI") ?? "";
+  const doiMatch = doi.match(/10\.48550\/arXiv\.(\d{4}\.\d{4,5})/);
+  if (doiMatch) return doiMatch[1];
+
+  const extra: string = item.getField("extra") ?? "";
+  const extraMatch = extra.match(/arXiv:(\d{4}\.\d{4,5})/);
+  if (extraMatch) return extraMatch[1];
+
+  return null;
+}
+
+function isPreprint(item: any): boolean {
+  if (!item.isRegularItem()) return false;
+  if (item.itemType === "preprint") return true;
+  const url: string = item.getField("url") ?? "";
+  if (url.includes("arxiv.org")) return true;
+  return extractArxivId(item) !== null;
+}
+
+function identifyPreprints(items: any[]): any[] {
+  return items.filter(isPreprint);
+}
+
+function isPublishedDOI(doi: string): boolean {
+  return !doi.startsWith("10.48550/arXiv.");
+}
+
+function isPublishedVenue(venue: string): boolean {
+  if (!venue || !venue.trim()) return false;
+  return !PREPRINT_VENUES.has(venue.toLowerCase().trim());
+}
+
+// Direct arXiv ID lookup — extracts the journal DOI the author reported on arXiv.
+// NOT a title search; fetches metadata for the specific arXiv entry only.
+async function findPublishedDOIFromArxivById(
+  arxivId: string,
+): Promise<string | null> {
+  const url = `https://export.arxiv.org/api/query?id_list=${arxivId}&max_results=1`;
+  try {
+    const response: any = await withTimeout(
+      Zotero.HTTP.request("GET", url, {
+        headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
+      }),
+      10_000,
+    );
+    const xmlDoc = new DOMParser().parseFromString(
+      response.responseText,
+      "text/xml",
+    );
+    const entry = xmlDoc.querySelector("entry");
+    if (!entry) return null;
+
+    const doi = extractDoiFromArxivEntry(entry);
+    if (doi && isPublishedDOI(doi)) return doi;
+  } catch (e) {
+    Zotero.debug(`Metadata Hunter: arXiv ID lookup failed: ${e}`);
+  }
+  return null;
+}
+
+async function findPublishedDOIFromSemanticScholar(
+  title: string,
+): Promise<string | null> {
+  const url = `https://api.semanticscholar.org/graph/v1/paper/search/match?query=${encodeURIComponent(cleanTitleForQuery(title))}&fields=externalIds,title,venue,publicationVenue`;
+  try {
+    const response: any = await withTimeout(
+      Zotero.HTTP.request("GET", url, {
+        headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
+      }),
+      10_000,
+    );
+    const data = JSON.parse(response.responseText);
+    const paper = data.data?.[0];
+    if (!paper || !isTitleMatch(title, paper.title)) return null;
+
+    const doi = paper.externalIds?.DOI;
+    if (!doi || !isPublishedDOI(doi)) return null;
+
+    const venue =
+      paper.publicationVenue?.name ??
+      paper.publicationVenue?.alternate_names?.[0] ??
+      paper.venue ??
+      "";
+    if (!isPublishedVenue(venue)) return null;
+
+    return doi;
+  } catch (e) {
+    Zotero.debug(
+      `Metadata Hunter: Semantic Scholar preprint lookup failed: ${e}`,
+    );
+    return null;
+  }
+}
+
+async function findPublishedDOIFromCrossRef(
+  item: any,
+  title: string,
+): Promise<string | null> {
+  const creators = item.getCreators();
+  const lastName = creators.length > 0 ? creators[0].lastName : null;
+  const titleParam = `query.bibliographic=${encodeURIComponent(cleanTitleForQuery(title))}`;
+  const params = [titleParam];
+  if (lastName) params.push(`query.author=${encodeURIComponent(lastName)}`);
+
+  const url = `https://api.crossref.org/works?${params.join("&")}&rows=10`;
+  try {
+    const response: any = await withTimeout(
+      Zotero.HTTP.request("GET", url, {
+        headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
+      }),
+      10_000,
+    );
+    const data = JSON.parse(response.responseText);
+    for (const crItem of data.message?.items ?? []) {
+      if (!crItem.DOI || !isPublishedDOI(crItem.DOI)) continue;
+      if (!isTitleMatch(title, crItem.title?.[0])) continue;
+      if (PUBLISHED_CROSSREF_TYPES.has(crItem.type ?? "")) return crItem.DOI;
+    }
+  } catch (e) {
+    Zotero.debug(`Metadata Hunter: CrossRef preprint lookup failed: ${e}`);
+  }
+  return null;
+}
+
+async function findPublishedDOIFromDBLP(
+  item: any,
+  title: string,
+): Promise<string | null> {
+  const queryWords = cleanTitleForQuery(title).replace(/\s+/g, " ").trim();
+  const creators = item.getCreators();
+  const authorSuffix =
+    creators.length > 0 && creators[0].lastName
+      ? ` ${creators[0].lastName}`
+      : "";
+
+  const q = encodeURIComponent(queryWords + authorSuffix);
+  const url = `https://dblp.org/search/publ/api?q=${q}&format=json&h=5&c=0`;
+
+  try {
+    const response: any = await withTimeout(
+      Zotero.HTTP.request("GET", url, {
+        headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
+      }),
+      10_000,
+    );
+    const data = JSON.parse(response.responseText);
+    const rawHits = data.result?.hits?.hit;
+    if (!rawHits) return null;
+
+    const hits: any[] = Array.isArray(rawHits) ? rawHits : [rawHits];
+
+    for (const hit of hits) {
+      const info = hit.info;
+      if (!info || !isTitleMatch(title, info.title)) continue;
+      if (!isPublishedVenue(info.venue ?? "")) continue;
+
+      if (info.doi && isPublishedDOI(info.doi)) return info.doi as string;
+
+      if (info.ee) {
+        const ee: string = Array.isArray(info.ee) ? info.ee[0] : info.ee;
+        const match = ee.match(/doi\.org\/(.+)$/);
+        if (match && isPublishedDOI(match[1])) return match[1];
+      }
+    }
+  } catch (e) {
+    Zotero.debug(`Metadata Hunter: DBLP preprint lookup failed: ${e}`);
+  }
+  return null;
+}
+
+async function findPublishedDOI(item: any): Promise<string | null> {
+  const title = item.getField("title");
+  if (!title) return null;
+
+  const arxivId = extractArxivId(item);
+  if (arxivId) {
+    const doi = await findPublishedDOIFromArxivById(arxivId);
+    if (doi) return doi;
+  }
+
+  // Race all three fallback sources — first non-null result wins,
+  // same pattern as findAbstractForItem.
+  try {
+    return await Promise.any([
+      withNullAsReject(
+        withTimeout(findPublishedDOIFromSemanticScholar(title), 10_000),
+      ),
+      withNullAsReject(
+        withTimeout(findPublishedDOIFromCrossRef(item, title), 10_000),
+      ),
+      withNullAsReject(
+        withTimeout(findPublishedDOIFromDBLP(item, title), 10_000),
+      ),
+    ]);
+  } catch {
+    return null;
+  }
+}
+
+// Use Zotero's Translate.Search API — same mechanism as "Add Item by Identifier".
+async function createItemFromDOI(
+  doi: string,
+  sourceItem: any,
+): Promise<boolean> {
+  try {
+    const translate = new Zotero.Translate.Search();
+    translate.setIdentifier({ DOI: doi });
+    const translators = await translate.getTranslators();
+    if (!translators.length) return false;
+    translate.setTranslator(translators);
+    const newItems = await translate.translate({
+      libraryID: sourceItem.libraryID,
+      collections: sourceItem.getCollections(),
+      saveAttachments: false,
+    });
+    return newItems && newItems.length > 0;
+  } catch (e) {
+    Zotero.debug(
+      `Metadata Hunter: Failed to create item from DOI ${doi}: ${e}`,
+    );
+    return false;
+  }
+}
+
+interface PreprintResult {
+  found: number;
+  checked: number;
+  cancelled: boolean;
+  hadApiErrors: boolean;
+}
+
+async function processPreprints(
+  items: any[],
+  cancel: CancelToken,
+): Promise<PreprintResult> {
+  const result: PreprintResult = {
+    found: 0,
+    checked: 0,
+    cancelled: false,
+    hadApiErrors: false,
+  };
+
+  const progressWin = new Zotero.ProgressWindow({ closeOnClick: false });
+  progressWin.changeHeadline(getString("preprint.progress.title"));
+  progressWin.addLines(
+    getString("preprint.progress.hint"),
+    "chrome://zotero/skin/16/universal/book.svg",
+  );
+  progressWin.show();
+
+  const startTime = Date.now();
+  const total = items.length;
+
+  const updateProgress = () => {
+    progressWin.changeHeadline(
+      getString("preprint.progress.item", {
+        current: result.checked,
+        total,
+        percent: Math.round((result.checked / total) * 100),
+        found: result.found,
+        eta: formatEta(startTime, result.checked, total),
+      }),
+    );
+  };
+
+  for (let batchStart = 0; batchStart < total; batchStart += BATCH_SIZE) {
+    if (cancel.requested) {
+      result.cancelled = true;
+      break;
+    }
+
+    const batch = items.slice(batchStart, batchStart + BATCH_SIZE);
+    const batchStartTime = Date.now();
+
+    await Promise.all(
+      batch.map(async (item) => {
+        if (cancel.requested) return;
+        try {
+          const doi = await findPublishedDOI(item);
+          if (doi) {
+            const created = await createItemFromDOI(doi, item);
+            if (created) {
+              item.deleted = true;
+              await item.saveTx();
+              result.found++;
+            }
+          }
+        } catch (e) {
+          Zotero.debug(
+            `Metadata Hunter: Error checking preprint ${item.id}: ${e}`,
+          );
+          result.hadApiErrors = true;
+        }
+
+        result.checked++;
+        updateProgress();
+      }),
+    );
+
+    const isLastBatch = batchStart + BATCH_SIZE >= total;
+    if (!isLastBatch && !cancel.requested) {
+      const elapsed = Date.now() - batchStartTime;
+      const pad = BATCH_MIN_INTERVAL_MS - elapsed;
+      if (pad > 0) await Zotero.Promise.delay(pad);
+    }
+  }
+
+  progressWin.close();
+  return result;
+}
+
+function buildPreprintResultMessage(r: PreprintResult): string {
+  let msg: string;
+
+  if (r.cancelled) {
+    msg = getString("preprint.cancelled", {
+      checked: r.checked,
+      found: r.found,
+    });
+  } else if (r.found === 0) {
+    msg = getString("preprint.noPublished", { total: r.checked });
+  } else {
+    msg = getString("preprint.found", {
+      found: r.found,
+      total: r.checked,
+    });
+  }
+
+  if (r.hadApiErrors) msg += getString("preprint.apiWarning");
+  return msg;
+}
+
+async function runFindPublishedVersions(
+  preprints: any[],
+  noneFoundKey: string,
+): Promise<void> {
+  if (activeCancel) return;
+
+  if (preprints.length === 0) {
+    Services.prompt.alert(
+      null,
+      getString("preprint.title"),
+      getString(noneFoundKey),
+    );
+    return;
+  }
+
+  const cancel = new CancelToken();
+  activeCancel = cancel;
+  syncAllToolbarButtons();
+
+  try {
+    const result = await processPreprints(preprints, cancel);
+    Services.prompt.alert(
+      null,
+      getString("preprint.title"),
+      buildPreprintResultMessage(result),
+    );
+  } finally {
+    activeCancel = null;
+    syncAllToolbarButtons();
+  }
+}
+
+async function findPublishedVersions(): Promise<void> {
+  const ZP = Zotero.getActiveZoteroPane();
+  let items: any[] = ZP.getSelectedItems();
+
+  if (items.length === 0) {
+    const collection = ZP.getSelectedCollection();
+    const libraryID = collection
+      ? collection.libraryID
+      : ZP.getSelectedLibraryID();
+    items = collection
+      ? collection.getChildItems()
+      : await Zotero.Items.getAll(libraryID);
+  }
+
+  await runFindPublishedVersions(
+    identifyPreprints(items),
+    "preprint.noneFound",
+  );
+}
+
+async function findPublishedVersionsForSelected(): Promise<void> {
+  const ZP = Zotero.getActiveZoteroPane();
+  await runFindPublishedVersions(
+    identifyPreprints(ZP.getSelectedItems()),
+    "preprint.noneFoundSelected",
+  );
 }
 
 // ── Entry points ───────────────────────────────────────────────────────────────
