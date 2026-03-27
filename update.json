@@ -1,10 +1,10 @@
 {
   "addons": {
-    "metadatahunter@zotero.org": {
+    "metadatahunter@federicotorrielli.github.io": {
       "updates": [
         {
           "version": "0.2.2",
-          "update_link": "https://github.com/federicotorrielli/zotero-metadata-hunter/releases/download/v0.2.2/metadatahunter@zotero.org-0.2.2.xpi"
+          "update_link": "https://github.com/federicotorrielli/zotero-metadata-hunter/releases/download/v0.2.2/metadatahunter@federicotorrielli.github.io-0.2.2.xpi"
         }
       ]
     }

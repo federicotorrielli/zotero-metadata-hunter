@@ -1,10 +1,10 @@
 {
   "name": "zotero-metadata-hunter",
-  "version": "0.2.3.2",
+  "version": "0.2.3.3",
   "description": "A Zotero plugin to find and add missing DOI numbers and abstracts to references",
   "config": {
     "addonName": "Metadata Hunter",
-    "addonID": "metadatahunter@zotero.org",
+    "addonID": "metadatahunter@federicotorrielli.github.io",
     "addonRef": "metadatahunter",
     "addonInstance": "MetadataHunter",
     "prefsPrefix": "extensions.zotero.metadatahunter"
