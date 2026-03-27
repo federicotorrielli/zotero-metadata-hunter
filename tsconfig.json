@@ -19,13 +19,6 @@
     "noFallthroughCasesInSwitch": true,
     "types": ["zotero-types", "node"]
   },
-  "include": [
-    "src/**/*",
-    "typings/**/*"
-  ],
-  "exclude": [
-    "node_modules",
-    "build",
-    "dist"
-  ]
+  "include": ["src/**/*", "typings/**/*"],
+  "exclude": ["node_modules", "build", "dist"]
 }

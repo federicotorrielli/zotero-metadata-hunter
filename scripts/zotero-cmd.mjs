@@ -1,5 +1,13 @@
 import { execSync } from "child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, statSync, readdirSync } from "fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  statSync,
+  readdirSync,
+} from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
@@ -18,7 +26,7 @@ function copyFolder(src, dest) {
   const exists = existsSync(src);
   const stats = exists && statSync(src);
   const isDirectory = exists && stats.isDirectory();
-  
+
   if (isDirectory) {
     mkdirSync(dest, { recursive: true });
     readdirSync(src).forEach((childItemName) => {
@@ -31,15 +39,15 @@ function copyFolder(src, dest) {
 
 export async function build() {
   console.log(`Building version ${pkg.version}`);
-  
+
   if (existsSync(buildPath)) {
     execSync(`rm -rf ${buildPath}`);
   }
-  
+
   mkdirSync(addonPath, { recursive: true });
-  
+
   copyFolder(path.join(rootPath, "addon"), addonPath);
-  
+
   const replaceFrom = [
     /__version__/g,
     /__author__/g,
@@ -48,7 +56,7 @@ export async function build() {
     /__addonName__/g,
     /__addonRef__/g,
   ];
-  
+
   const replaceTo = [
     pkg.version,
     pkg.author.name || pkg.author,
@@ -57,16 +65,16 @@ export async function build() {
     pkg.config.addonName,
     pkg.config.addonRef,
   ];
-  
+
   replaceInFileSync({
     files: [`${addonPath}/**/*.*`],
     from: replaceFrom,
     to: replaceTo,
     countMatches: true,
   });
-  
+
   mkdirSync(path.join(addonPath, "content", "scripts"), { recursive: true });
-  
+
   await esbuild.build({
     entryPoints: [path.join(rootPath, "src", "index.ts")],
     bundle: true,
@@ -74,10 +82,13 @@ export async function build() {
     target: "firefox128",
     outfile: path.join(addonPath, "content", "scripts", "index.js"),
   });
-  
+
   if (process.env.NODE_ENV === "production") {
     console.log("Creating XPI file...");
-    const xpiPath = path.join(buildPath, `${pkg.config.addonID}-${pkg.version}.xpi`);
+    const xpiPath = path.join(
+      buildPath,
+      `${pkg.config.addonID}-${pkg.version}.xpi`,
+    );
     await compressing.zip.compressDir(addonPath, xpiPath, {
       ignoreBase: true,
     });
