@@ -791,6 +791,13 @@ function isPreprint(item: any): boolean {
   if (item.itemType === "preprint") return true;
   const url: string = item.getField("url") ?? "";
   if (url.includes("arxiv.org")) return true;
+  // Items imported from DBLP as CoRR entries (arXiv CS preprints)
+  const pub: string = (
+    item.getField("publicationTitle") ??
+    item.getField("proceedingsTitle") ??
+    ""
+  ).toLowerCase();
+  if (pub === "corr") return true;
   return extractArxivId(item) !== null;
 }
 
