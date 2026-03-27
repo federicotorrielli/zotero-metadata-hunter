@@ -68,7 +68,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin main
-          git checkout main
+          git checkout -f main
           git add update.json
           git diff --staged --quiet || git commit -m "chore: update update.json for ${{ github.ref_name }}"
           git push origin main
