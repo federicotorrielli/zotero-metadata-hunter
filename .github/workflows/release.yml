@@ -36,14 +36,21 @@ jobs:
           echo "addon_id=$(node -p "require('./package.json').config.addonID")" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: "v${{ steps.meta.outputs.version }}"
           generate_release_notes: true
           files: build/${{ steps.meta.outputs.addon_id }}-${{ steps.meta.outputs.version }}.xpi
 
-      - name: Update update.json
+      - name: Update and push update.json on main
         run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          # Switch to main BEFORE writing update.json — `checkout -f` discards any
+          # working-tree changes, so writing the file first would wipe it silently.
+          git checkout -f main
+
           VERSION="${{ steps.meta.outputs.version }}"
           ADDON_ID="${{ steps.meta.outputs.addon_id }}"
           TAG="${{ github.ref_name }}"
@@ -63,12 +70,6 @@ jobs:
           }
           EOF
 
-      - name: Commit and push update.json
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git checkout -f main
           git add update.json
           git diff --staged --quiet || git commit -m "chore: update update.json for ${{ github.ref_name }}"
           git push origin main
