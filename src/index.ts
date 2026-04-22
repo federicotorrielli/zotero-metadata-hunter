@@ -11,6 +11,35 @@ const windowKeyHandlers = new WeakMap<Window, (e: KeyboardEvent) => void>();
 let activeCancel: CancelToken | null = null;
 let pluginRootURI = "";
 
+// ── Failure tags ───────────────────────────────────────────────────────────────
+// Persistent tags applied to items that couldn't be processed. Users can
+// filter their library by these tags to find items needing manual attention,
+// and the tags are auto-removed on a subsequent successful run.
+const TAG_NO_DOI = "MetadataHunter: No DOI";
+const TAG_NO_PUBLISHED = "MetadataHunter: No Published Version";
+const TAG_UPDATE_FAILED = "MetadataHunter: Update Failed";
+
+async function setFailureTag(item: any, tag: string): Promise<void> {
+  if (item.hasTag(tag)) return;
+  try {
+    item.addTag(tag);
+    await item.saveTx();
+  } catch (e) {
+    Zotero.debug(`Metadata Hunter: Failed to add tag "${tag}" to item: ${e}`);
+  }
+}
+
+async function clearFailureTags(item: any, tags: string[]): Promise<void> {
+  const toRemove = tags.filter((t) => item.hasTag(t));
+  if (toRemove.length === 0) return;
+  try {
+    for (const t of toRemove) item.removeTag(t);
+    await item.saveTx();
+  } catch (e) {
+    Zotero.debug(`Metadata Hunter: Failed to clear failure tags: ${e}`);
+  }
+}
+
 // ── Cancel token ───────────────────────────────────────────────────────────────
 
 class CancelToken {
@@ -608,6 +637,7 @@ interface ProcessResult {
   foundDOIs: number;
   foundAbstracts: number;
   processed: number;
+  taggedNoDOI: number;
   cancelled: boolean;
   hadApiErrors: boolean;
 }
@@ -625,6 +655,7 @@ async function processItems(
     foundDOIs: 0,
     foundAbstracts: 0,
     processed: 0,
+    taggedNoDOI: 0,
     cancelled: false,
     hadApiErrors: false,
   };
@@ -679,6 +710,11 @@ async function processItems(
               item.setField("DOI", doi);
               await item.saveTx();
               result.foundDOIs++;
+              // Clear any prior "no DOI" mark from a previous run
+              await clearFailureTags(item, [TAG_NO_DOI]);
+            } else {
+              await setFailureTag(item, TAG_NO_DOI);
+              result.taggedNoDOI++;
             }
           }
 
@@ -748,6 +784,12 @@ function buildResultMessage(r: ProcessResult): string {
     });
   }
 
+  if (r.taggedNoDOI > 0) {
+    msg += getString("findDOI.taggedNoDOI", {
+      count: r.taggedNoDOI,
+      tag: TAG_NO_DOI,
+    });
+  }
   if (r.hadApiErrors) msg += getString("findDOI.apiWarning");
   return msg;
 }
@@ -1031,27 +1073,29 @@ async function findPublishedDOI(item: any): Promise<PublishedRef | null> {
 }
 
 // Use Zotero's Translate.Search API — same mechanism as "Add Item by Identifier".
+// Returns the newly created item (or null). The caller needs the item handle to
+// re-parent attachments/notes before the source preprint is trashed.
 async function createItemFromDOI(
   doi: string,
   sourceItem: any,
-): Promise<boolean> {
+): Promise<any | null> {
   try {
     const translate = new Zotero.Translate.Search();
     translate.setIdentifier({ DOI: doi });
     const translators = await translate.getTranslators();
-    if (!translators.length) return false;
+    if (!translators.length) return null;
     translate.setTranslator(translators);
     const newItems = await translate.translate({
       libraryID: sourceItem.libraryID,
       collections: sourceItem.getCollections(),
       saveAttachments: false,
     });
-    return newItems && newItems.length > 0;
+    return newItems && newItems.length > 0 ? newItems[0] : null;
   } catch (e) {
     Zotero.debug(
       `Metadata Hunter: Failed to create item from DOI ${doi}: ${e}`,
     );
-    return false;
+    return null;
   }
 }
 
@@ -1060,9 +1104,9 @@ async function createItemFromDOI(
 async function createItemFromURL(
   url: string,
   sourceItem: any,
-): Promise<boolean> {
+): Promise<any | null> {
   try {
-    let created = false;
+    let created: any = null;
     await Zotero.HTTP.processDocuments([url], async (doc: any) => {
       const translate = new Zotero.Translate.Web();
       translate.setDocument(doc);
@@ -1074,29 +1118,61 @@ async function createItemFromURL(
         collections: sourceItem.getCollections(),
         saveAttachments: false,
       });
-      created = newItems && newItems.length > 0;
+      if (newItems && newItems.length > 0) created = newItems[0];
     });
     return created;
   } catch (e) {
     Zotero.debug(
       `Metadata Hunter: Failed to create item from URL ${url}: ${e}`,
     );
-    return false;
+    return null;
   }
 }
 
 async function createItemFromPublished(
   ref: PublishedRef,
   sourceItem: any,
-): Promise<boolean> {
+): Promise<any | null> {
   return "doi" in ref
     ? createItemFromDOI(ref.doi, sourceItem)
     : createItemFromURL(ref.url, sourceItem);
 }
 
+// Re-parent the source preprint's child attachments and notes onto the new
+// published-version item. Zotero trashes children with their parent, so without
+// this step user-added PDFs, annotations, and notes go to Trash alongside the
+// preprint — silent data loss if Trash is later emptied.
+async function migrateChildrenToItem(
+  sourceItem: any,
+  newItem: any,
+): Promise<number> {
+  const childIDs: number[] = [
+    ...(sourceItem.getAttachments() ?? []),
+    ...(sourceItem.getNotes() ?? []),
+  ];
+  let migrated = 0;
+  for (const id of childIDs) {
+    try {
+      const child = await Zotero.Items.getAsync(id);
+      if (!child) continue;
+      child.parentItemID = newItem.id;
+      await child.saveTx();
+      migrated++;
+    } catch (e) {
+      Zotero.debug(
+        `Metadata Hunter: Failed to re-parent child ${id} to item ${newItem.id}: ${e}`,
+      );
+    }
+  }
+  return migrated;
+}
+
 interface PreprintResult {
   found: number;
   checked: number;
+  migratedChildren: number;
+  taggedNoPublished: number;
+  taggedFailed: number;
   cancelled: boolean;
   hadApiErrors: boolean;
 }
@@ -1108,6 +1184,9 @@ async function processPreprints(
   const result: PreprintResult = {
     found: 0,
     checked: 0,
+    migratedChildren: 0,
+    taggedNoPublished: 0,
+    taggedFailed: 0,
     cancelled: false,
     hadApiErrors: false,
   };
@@ -1149,12 +1228,24 @@ async function processPreprints(
         if (cancel.requested) return;
         try {
           const ref = await findPublishedDOI(item);
-          if (ref) {
-            const created = await createItemFromPublished(ref, item);
-            if (created) {
+          if (!ref) {
+            await setFailureTag(item, TAG_NO_PUBLISHED);
+            result.taggedNoPublished++;
+          } else {
+            const newItem = await createItemFromPublished(ref, item);
+            if (newItem) {
+              // Re-parent child attachments and notes BEFORE trashing the source,
+              // otherwise Zotero sends them to Trash along with the preprint parent.
+              result.migratedChildren += await migrateChildrenToItem(
+                item,
+                newItem,
+              );
               item.deleted = true;
               await item.saveTx();
               result.found++;
+            } else {
+              await setFailureTag(item, TAG_UPDATE_FAILED);
+              result.taggedFailed++;
             }
           }
         } catch (e) {
@@ -1162,6 +1253,12 @@ async function processPreprints(
             `Metadata Hunter: Error checking preprint ${item.id}: ${e}`,
           );
           result.hadApiErrors = true;
+          try {
+            await setFailureTag(item, TAG_UPDATE_FAILED);
+            result.taggedFailed++;
+          } catch {
+            // best-effort; already logged
+          }
         }
 
         result.checked++;
@@ -1198,6 +1295,23 @@ function buildPreprintResultMessage(r: PreprintResult): string {
     });
   }
 
+  if (r.migratedChildren > 0) {
+    msg += getString("preprint.migratedChildren", {
+      count: r.migratedChildren,
+    });
+  }
+  if (r.taggedNoPublished > 0) {
+    msg += getString("preprint.taggedNoPublished", {
+      count: r.taggedNoPublished,
+      tag: TAG_NO_PUBLISHED,
+    });
+  }
+  if (r.taggedFailed > 0) {
+    msg += getString("preprint.taggedFailed", {
+      count: r.taggedFailed,
+      tag: TAG_UPDATE_FAILED,
+    });
+  }
   if (r.hadApiErrors) msg += getString("preprint.apiWarning");
   return msg;
 }

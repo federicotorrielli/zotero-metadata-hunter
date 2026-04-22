@@ -6,11 +6,12 @@ A Zotero plugin that automatically finds and adds missing DOIs and abstracts to 
 
 - **4 DOI sources**: CrossRef → DBLP → Semantic Scholar → arXiv, tried in order
 - **3 abstract sources**: Semantic Scholar, PubMed, and OpenAlex raced in parallel — fastest wins
-- **Preprint upgrading**: detects arXiv preprints and checks if a published version exists; creates a fully-populated item and moves the preprint to trash
+- **Preprint upgrading**: detects arXiv preprints and checks if a published version exists; creates a fully-populated item and moves the preprint to trash — child attachments, annotations, and notes are re-parented onto the new item so nothing is lost
 - **Parallel processing**: items processed in batches of 5 (~10× faster than serial)
 - **Smart title matching**: Levenshtein similarity with length-gating and subtitle-aware query cleaning
 - **Cancellable**: press `Ctrl/Cmd+Alt+D` (DOI finding) or `Ctrl/Cmd+Alt+P` (preprint check) to stop mid-run
 - **Live progress**: headline shows a running tally and ETA while processing
+- **Failure tags**: items that couldn't be resolved are tagged so you can filter and retry them later
 
 ## Installation
 
@@ -42,9 +43,21 @@ Items that already have both a DOI and an abstract are skipped.
 | **Tools → Find Published Versions of Preprints** | Current collection or full library |
 | `Ctrl/Cmd + Alt + P`                             | Current collection or full library |
 
-Detects preprints by item type, arXiv URL, arXiv DOI (`10.48550/arXiv.*`), or `arXiv:` in the Extra field. When a published version is found, a new fully-populated item is created (via the same mechanism as _Add Item by Identifier_) and the original preprint is moved to trash.
+Detects preprints by item type, arXiv URL, arXiv DOI (`10.48550/arXiv.*`), or `arXiv:` in the Extra field. When a published version is found, a new fully-populated item is created (via the same mechanism as _Add Item by Identifier_), any attachments, annotations, and notes on the original preprint are re-parented onto the new item, and the (now-empty) preprint is moved to trash. Your annotated PDFs stay with the upgraded record — even if you empty Trash afterward.
 
 To cancel any running operation, use the same shortcut again or click the toolbar button — it toggles.
+
+## Failure Tags
+
+Items that couldn't be resolved are tagged so you can find and retry them via Zotero's tag filter:
+
+| Tag                                    | Meaning                                                             |
+| -------------------------------------- | ------------------------------------------------------------------- |
+| `MetadataHunter: No DOI`               | No DOI could be found for this item in any of the four sources      |
+| `MetadataHunter: No Published Version` | Preprint was checked but no non-preprint publication was found      |
+| `MetadataHunter: Update Failed`        | A published version was found but the new item could not be created |
+
+A tag is automatically removed on a later run if the item is resolved successfully.
 
 ## How It Works
 

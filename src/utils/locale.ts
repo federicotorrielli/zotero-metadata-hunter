@@ -22,6 +22,8 @@ export function getString(
       "Found ${dois} new DOI(s) and ${abstracts} abstract(s) across ${total} items processed.",
     "findDOI.cancelled":
       "Cancelled after ${processed} item(s). Found ${dois} DOI(s) and ${abstracts} abstract(s).",
+    "findDOI.taggedNoDOI":
+      '\n\n${count} item(s) tagged with "${tag}" — filter by this tag to review them.',
     "findDOI.apiWarning":
       "\n\nNote: some API requests failed — results may be incomplete.",
     "findDOI.progress.title": "Finding DOIs and Abstracts",
@@ -39,6 +41,12 @@ export function getString(
       "No published versions were found for ${total} preprint(s) checked.",
     "preprint.found":
       "Found published versions for ${found} of ${total} preprint(s). New items have been added and originals moved to trash.",
+    "preprint.migratedChildren":
+      "\n\nMoved ${count} attachment(s)/note(s) from the preprint(s) onto the new published item(s).",
+    "preprint.taggedNoPublished":
+      '\n\n${count} preprint(s) tagged with "${tag}" — filter by this tag to review them.',
+    "preprint.taggedFailed":
+      '\n\n${count} preprint(s) tagged with "${tag}" — a published version was found but the new item could not be created.',
     "preprint.cancelled":
       "Cancelled after checking ${checked} preprint(s). Found ${found} published version(s).",
     "preprint.apiWarning":
