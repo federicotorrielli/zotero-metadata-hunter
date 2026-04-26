@@ -31,20 +31,19 @@
     "url": "https://github.com/federicotorrielli/zotero-metadata-hunter/issues"
   },
   "homepage": "https://github.com/federicotorrielli/zotero-metadata-hunter#readme",
-  "dependencies": {},
   "devDependencies": {
-    "@types/node": "^25.5.0",
-    "@typescript-eslint/eslint-plugin": "^8.57.2",
-    "@typescript-eslint/parser": "^8.57.2",
+    "@types/node": "^25.6.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.0",
+    "@typescript-eslint/parser": "^8.59.0",
     "chokidar": "^5.0.0",
-    "compressing": "^2.1.0",
-    "esbuild": "^0.27.4",
-    "eslint": "^10.1.0",
+    "compressing": "^2.1.1",
+    "esbuild": "^0.27.7",
+    "eslint": "^10.2.1",
     "eslint-config-prettier": "^10.1.8",
-    "prettier": "^3.8.1",
+    "prettier": "^3.8.3",
     "release-it": "^19.2.4",
     "replace-in-file": "^8.4.0",
-    "typescript": "^6.0.2",
+    "typescript": "^6.0.3",
     "zotero-types": "^4.1.2"
   }
 }
