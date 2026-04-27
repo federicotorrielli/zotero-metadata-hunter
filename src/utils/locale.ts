@@ -5,7 +5,7 @@ export function getString(
   const strings: Record<string, string> = {
     "toolbar.label": "Find DOIs & Abstracts",
     "toolbar.tooltip": "Find missing DOIs and abstracts (Ctrl+Alt+D)",
-    "toolbar.cancel": "Cancel DOI Finding",
+    "toolbar.cancel": "Cancel Operation",
     "toolbar.cancel.tooltip": "Click to cancel the current operation",
     "menu.findDOI": "Find DOI and Abstract",
     "menu.findDOILibrary": "Find DOIs and Abstracts in Library",
@@ -56,6 +56,32 @@ export function getString(
       "Press Ctrl+Alt+P or click the toolbar button to cancel",
     "preprint.progress.item":
       "Checking ${current}/${total} (${percent}%) • ${found} published versions found${eta}",
+
+    "enrich.menu.library": "Enrich Metadata of Library",
+    "enrich.menu.selected": "Enrich Metadata",
+    "enrich.title": "Metadata Enrichment",
+    "enrich.noneEligible":
+      "No regular items needing enrichment were found. Preprints are skipped (use the preprint flow instead) and items already complete are not re-processed.",
+    "enrich.noneEligibleSelected":
+      "None of the selected items can be enriched. Preprints are skipped and only regular items are eligible.",
+    "enrich.noneEnriched":
+      "Checked ${total} item(s); no richer records were available beyond what was already stored.",
+    "enrich.found":
+      "Enriched ${enriched} of ${total} item(s), filling ${fields} field(s) in total.",
+    "enrich.cancelled":
+      "Cancelled after ${processed} item(s). Enriched ${enriched} item(s), filling ${fields} field(s).",
+    "enrich.taggedNoDOI":
+      '\n\n${count} item(s) tagged with "${tag}" because no DOI could be found, which is required for enrichment.',
+    "enrich.taggedNoRicher":
+      '\n\n${count} item(s) tagged with "${tag}" because the lookup returned no improvements over what is already stored.',
+    "enrich.taggedFailed":
+      '\n\n${count} item(s) tagged with "${tag}" because the metadata lookup or merge failed.',
+    "enrich.apiWarning":
+      "\n\nNote: some API requests failed, results may be incomplete.",
+    "enrich.progress.title": "Enriching Metadata",
+    "enrich.progress.hint": "Press Ctrl+Alt+M to cancel",
+    "enrich.progress.item":
+      "Processing ${current}/${total} (${percent}%) • ${enriched} enriched, ${fields} fields filled${eta}",
   };
 
   let str = strings[key] ?? key;

@@ -1,15 +1,16 @@
 # Zotero Metadata Hunter
 
-A Zotero plugin that automatically finds and adds missing DOIs and abstracts to your references, and checks whether preprints in your library have been published at a conference or journal.
+A Zotero plugin that automatically finds and adds missing DOIs and abstracts to your references, checks whether preprints in your library have been published at a conference or journal, and enriches sparse items (e.g. Google Scholar BibTeX imports) with full metadata pulled from Zotero's own translators.
 
 ## Features
 
 - **4 DOI sources**: CrossRef → DBLP → Semantic Scholar → arXiv, tried in order
 - **3 abstract sources**: Semantic Scholar, PubMed, and OpenAlex raced in parallel — fastest wins
 - **Preprint upgrading**: detects arXiv preprints and checks if a published version exists; creates a fully-populated item and moves the preprint to trash — child attachments, annotations, and notes are re-parented onto the new item so nothing is lost
+- **Metadata enrichment**: for already-published items with sparse fields (no venue, no abstract, no pages), looks up the canonical record by DOI and fills in the missing pieces in place. Item type is set by Zotero's own translator, so a Scholar BibTeX entry stuck on `journalArticle` for an ICML paper gets correctly promoted to `conferencePaper`.
 - **Parallel processing**: items processed in batches of 5 (~10× faster than serial)
 - **Smart title matching**: Levenshtein similarity with length-gating and subtitle-aware query cleaning
-- **Cancellable**: press `Ctrl/Cmd+Alt+D` (DOI finding) or `Ctrl/Cmd+Alt+P` (preprint check) to stop mid-run
+- **Cancellable**: press `Ctrl/Cmd+Alt+D` (DOI finding), `Ctrl/Cmd+Alt+P` (preprint check), or `Ctrl/Cmd+Alt+M` (enrichment) to stop mid-run
 - **Live progress**: headline shows a running tally and ETA while processing
 - **Failure tags**: items that couldn't be resolved are tagged so you can filter and retry them later
 
@@ -45,6 +46,16 @@ Items that already have both a DOI and an abstract are skipped.
 
 Detects preprints by item type, arXiv URL, arXiv DOI (`10.48550/arXiv.*`), or `arXiv:` in the Extra field. When a published version is found, a new fully-populated item is created (via the same mechanism as _Add Item by Identifier_), any attachments, annotations, and notes on the original preprint are re-parented onto the new item, and the (now-empty) preprint is moved to trash. Your annotated PDFs stay with the upgraded record — even if you empty Trash afterward.
 
+**Enrich Metadata**
+
+| Trigger                                | Scope                                                |
+| -------------------------------------- | ---------------------------------------------------- |
+| Right-click → **Enrich Metadata**      | Selected items only                                  |
+| **Tools → Enrich Metadata of Library** | Sparse regular items in current collection / library |
+| `Ctrl/Cmd + Alt + M`                   | Sparse regular items in current collection / library |
+
+Enrichment uses the existing DOI on the item (or finds one first via the DOI cascade), then runs a single `Translate.Search` by DOI to pull the fully-hydrated record straight from Zotero's CrossRef translator. Missing scalar fields (venue, volume, issue, pages, ISSN, publisher, date, language, URL, series) are filled, the abstract is replaced when the existing one is empty or suspiciously short, and the creator list is replaced when the existing list looks truncated (fewer than 2 entries, or strictly shorter than the hydrated list with at least one shared surname). The item is updated in place, so collections, citation keys, and attached PDFs are not disturbed. Preprints are skipped (use the preprint flow instead). The `MetadataHunter: No Richer Record` tag is applied when the lookup succeeded but yielded nothing better than what was already stored.
+
 To cancel any running operation, use the same shortcut again or click the toolbar button — it toggles.
 
 ## Failure Tags
@@ -56,6 +67,7 @@ Items that couldn't be resolved are tagged so you can find and retry them via Zo
 | `MetadataHunter: No DOI`               | No DOI could be found for this item in any of the four sources      |
 | `MetadataHunter: No Published Version` | Preprint was checked but no non-preprint publication was found      |
 | `MetadataHunter: Update Failed`        | A published version was found but the new item could not be created |
+| `MetadataHunter: No Richer Record`     | Enrichment ran but found no fields to add beyond what was stored    |
 
 A tag is automatically removed on a later run if the item is resolved successfully.
 

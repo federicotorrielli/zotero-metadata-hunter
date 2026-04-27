@@ -18,6 +18,7 @@ let pluginRootURI = "";
 const TAG_NO_DOI = "MetadataHunter: No DOI";
 const TAG_NO_PUBLISHED = "MetadataHunter: No Published Version";
 const TAG_UPDATE_FAILED = "MetadataHunter: Update Failed";
+const TAG_NO_RICHER_RECORD = "MetadataHunter: No Richer Record";
 
 async function setFailureTag(item: any, tag: string): Promise<void> {
   if (item.hasTag(tag)) return;
@@ -85,7 +86,10 @@ Zotero.MetadataHunter = {
   findDOIsForSelected,
   findPublishedVersions,
   findPublishedVersionsForSelected,
+  enrichMetadata,
+  enrichMetadataForSelected,
   isPreprint,
+  isEnrichable,
 };
 
 // ── Window UI ──────────────────────────────────────────────────────────────────
@@ -154,6 +158,13 @@ function setupWindowKeyShortcut(win: Window) {
         activeCancel.cancel();
       } else {
         findPublishedVersions();
+      }
+    } else if (key === "m") {
+      e.preventDefault();
+      if (activeCancel) {
+        activeCancel.cancel();
+      } else {
+        enrichMetadata();
       }
     }
   };
@@ -1374,6 +1385,481 @@ async function findPublishedVersionsForSelected(): Promise<void> {
     identifyPreprints(ZP.getSelectedItems()),
     "preprint.noneFoundSelected",
   );
+}
+
+// ── Metadata enrichment ────────────────────────────────────────────────────────
+
+// Fields whose values, if present on the hydrated record, are filled onto the
+// existing item only when the existing field is empty. Order matters only for
+// readability; the merge loop is order-independent.
+const FILL_MISSING_FIELDS = [
+  "title",
+  "publicationTitle",
+  "proceedingsTitle",
+  "conferenceName",
+  "publisher",
+  "place",
+  "volume",
+  "issue",
+  "pages",
+  "ISSN",
+  "ISBN",
+  "language",
+  "url",
+  "series",
+  "seriesTitle",
+  "seriesNumber",
+];
+
+// Heuristic for "needs enrichment": missing at least one core publication field.
+// Used by analyzeItemsForEnrichment to filter library-wide runs to plausible
+// candidates and skip items already complete.
+function hasSparseMetadata(item: any): boolean {
+  const venue =
+    item.getField("publicationTitle")?.trim() ||
+    item.getField("proceedingsTitle")?.trim();
+  const abstract = item.getField("abstractNote")?.trim();
+  const pages = item.getField("pages")?.trim();
+  const volume = item.getField("volume")?.trim();
+  return !venue || !abstract || !pages || !volume;
+}
+
+// A regular, non-preprint item that the enrichment flow can act on. Right-click
+// menu visibility uses this; library-wide runs additionally apply the
+// hasSparseMetadata filter.
+function isEnrichable(item: any): boolean {
+  return item.isRegularItem() && !isPreprint(item);
+}
+
+function analyzeItemsForEnrichment(items: any[]): any[] {
+  return items.filter((it) => isEnrichable(it) && hasSparseMetadata(it));
+}
+
+interface NormalizedRecord {
+  itemType: string;
+  fields: Record<string, string>;
+  creators: any[];
+}
+
+// Snapshot the scratch's hydrated data into a plain object. Runs against the
+// live scratch (before the erase in fetchRichRecordByDOI's finally), so the
+// returned record is self-contained and survives the scratch's deletion.
+function normalizeScratch(scratch: any): NormalizedRecord {
+  const itemType = Zotero.ItemTypes.getName(scratch.itemTypeID) ?? "";
+  const fields: Record<string, string> = {};
+
+  const candidateFields = [...FILL_MISSING_FIELDS, "abstractNote", "date"];
+  for (const name of candidateFields) {
+    const fieldID = Zotero.ItemFields.getID(name);
+    if (!fieldID) continue;
+    if (!Zotero.ItemFields.isValidForType(fieldID, scratch.itemTypeID)) continue;
+    try {
+      const v = scratch.getField(name);
+      if (v != null && String(v).trim()) fields[name] = String(v);
+    } catch {
+      // skip unreadable fields
+    }
+  }
+
+  const creators = (scratch.getCreators?.() ?? []).map((c: any) => ({ ...c }));
+  return { itemType, fields, creators };
+}
+
+// Translator-by-DOI run that strips the scratch item afterwards. Same machinery
+// as "Add Item by Identifier" — the hydrated item is fully populated by Zotero's
+// CrossRef translator, including itemType. translate.translate() persists the
+// scratch to the library, so we normalize its data into a plain record inside
+// the try block (evaluated before finally) and erase the scratch in finally.
+// Without the erase, every enrichment of a DOI-bearing item silently doubles
+// the library; without the pre-erase normalization, the caller would be reading
+// from a deleted item and relying on undocumented in-memory cache survival.
+async function fetchRichRecordByDOI(
+  doi: string,
+  sourceItem: any,
+): Promise<NormalizedRecord | null> {
+  let scratch: any = null;
+  try {
+    const translate = new Zotero.Translate.Search();
+    translate.setIdentifier({ DOI: doi });
+    const translators = await translate.getTranslators();
+    if (!translators.length) return null;
+    translate.setTranslator(translators);
+    const newItems = await translate.translate({
+      libraryID: sourceItem.libraryID,
+      collections: [],
+      saveAttachments: false,
+    });
+    scratch = newItems && newItems.length > 0 ? newItems[0] : null;
+    if (!scratch) return null;
+    return normalizeScratch(scratch);
+  } catch (e) {
+    Zotero.debug(
+      `Metadata Hunter: Failed to fetch rich record for DOI ${doi}: ${e}`,
+    );
+    return null;
+  } finally {
+    if (scratch) {
+      try {
+        await Zotero.Items.erase(scratch.id);
+      } catch (e) {
+        Zotero.debug(
+          `Metadata Hunter: Failed to erase scratch item ${scratch.id}: ${e}`,
+        );
+      }
+    }
+  }
+}
+
+// Decide whether the hydrated creator list should replace the existing one.
+// Replace iff the existing list is shorter than 2 (Scholar BibTeX truncation
+// signature) OR the hydrated list is strictly larger AND at least one existing
+// surname appears in the hydrated list (sanity check against wrong-paper match).
+function shouldReplaceCreators(existing: any[], hydrated: any[]): boolean {
+  if (!hydrated || hydrated.length === 0) return false;
+  if (existing.length < 2) return true;
+  if (hydrated.length <= existing.length) return false;
+  // Fall back to `name` for institutional creators (fieldMode: 1), which have
+  // no lastName. Without this fallback, lists of corporate authors never match.
+  const key = (c: any) => (c.lastName || c.name || "").toLowerCase().trim();
+  const existingKeys = new Set(existing.map(key).filter(Boolean));
+  return hydrated.some((c) => existingKeys.has(key(c)));
+}
+
+// Apply the hydrated payload's fields onto the existing item in place.
+// Returns the list of Zotero field names actually mutated so callers can tell
+// a true no-op from a successful enrichment. Consumes a NormalizedRecord
+// (plain object) rather than a live scratch item, so the scratch can be
+// erased before this runs without losing data.
+function enrichItemFromMetadata(
+  item: any,
+  payload: NormalizedRecord,
+): { changed: string[] } {
+  const changed: string[] = [];
+
+  // Item type is set first because Zotero re-validates field/type pairings on
+  // type change; a journalArticle promoted to conferencePaper, for example,
+  // requires venue to live in proceedingsTitle rather than publicationTitle.
+  if (payload.itemType && payload.itemType !== item.itemType) {
+    try {
+      const newTypeID = Zotero.ItemTypes.getID(payload.itemType);
+      if (newTypeID) {
+        item.setType(newTypeID);
+        changed.push("itemType");
+      }
+    } catch (e) {
+      Zotero.debug(`Metadata Hunter: Failed to set item type: ${e}`);
+    }
+  }
+
+  // Fill-missing scalar fields, gated by Zotero's per-type field validity so we
+  // never write a field that the (possibly newly promoted) item type rejects.
+  for (const fieldName of FILL_MISSING_FIELDS) {
+    const value = (payload.fields[fieldName] ?? "").trim();
+    if (!value) continue;
+
+    const fieldID = Zotero.ItemFields.getID(fieldName);
+    if (!fieldID) continue;
+    if (!Zotero.ItemFields.isValidForType(fieldID, item.itemTypeID)) continue;
+
+    const existing = (item.getField(fieldName) ?? "").trim();
+    if (existing) continue;
+
+    item.setField(fieldName, value);
+    changed.push(fieldName);
+  }
+
+  // Date is fill-missing too, but the gate is "no 4-digit year" rather than
+  // "empty" — Scholar imports often store just a year string and we want to
+  // upgrade those to a full YYYY-MM-DD when CrossRef has it.
+  const payloadDate = (payload.fields.date ?? "").trim();
+  if (payloadDate) {
+    const existingDate = (item.getField("date") ?? "").trim();
+    if (!existingDate || !existingDate.match(/\d{4}/)) {
+      item.setField("date", payloadDate);
+      changed.push("date");
+    } else if (
+      existingDate.match(/^\d{4}$/) &&
+      payloadDate.match(/^\d{4}-\d{2}/)
+    ) {
+      item.setField("date", payloadDate);
+      changed.push("date");
+    }
+  }
+
+  // Abstract: replace if existing is empty or suspiciously short (Scholar
+  // imports often carry a one-line junk abstract that crowds out the real one).
+  const payloadAbstract = (payload.fields.abstractNote ?? "").trim();
+  if (payloadAbstract) {
+    const existingAbstract = (item.getField("abstractNote") ?? "").trim();
+    if (
+      !existingAbstract ||
+      (existingAbstract.length < 200 &&
+        payloadAbstract.length > existingAbstract.length)
+    ) {
+      item.setField("abstractNote", payloadAbstract);
+      if (!changed.includes("abstractNote")) changed.push("abstractNote");
+    }
+  }
+
+  // Creators: see shouldReplaceCreators for the policy.
+  const existingCreators = item.getCreators?.() ?? [];
+  if (shouldReplaceCreators(existingCreators, payload.creators)) {
+    item.setCreators(payload.creators);
+    changed.push("creators");
+  }
+
+  return { changed };
+}
+
+interface EnrichOutcome {
+  skipped?: boolean;
+  noDOI?: boolean;
+  failed?: boolean;
+  changed?: string[];
+}
+
+async function enrichItemMetadata(item: any): Promise<EnrichOutcome> {
+  if (!isEnrichable(item)) return { skipped: true };
+
+  let doi = item.getField("DOI")?.trim();
+  if (!doi || doi === "-") {
+    const found = await findDOIForItem(item);
+    if (!found) {
+      await setFailureTag(item, TAG_NO_DOI);
+      return { noDOI: true };
+    }
+    item.setField("DOI", found.doi);
+    // Keep the abstract that came bundled with the DOI lookup if Semantic
+    // Scholar won and the item has no abstract yet — saves one round trip.
+    if (found.abstract && !item.getField("abstractNote")?.trim()) {
+      item.setField("abstractNote", found.abstract);
+    }
+    await item.saveTx();
+    await clearFailureTags(item, [TAG_NO_DOI]);
+    doi = found.doi;
+  }
+
+  if (!doi) return { failed: true };
+  const payload = await fetchRichRecordByDOI(doi, item);
+  if (!payload) {
+    await setFailureTag(item, TAG_UPDATE_FAILED);
+    return { failed: true };
+  }
+
+  const { changed } = enrichItemFromMetadata(item, payload);
+  if (changed.length > 0) {
+    await item.saveTx();
+    await clearFailureTags(item, [TAG_NO_RICHER_RECORD, TAG_UPDATE_FAILED]);
+  } else {
+    await setFailureTag(item, TAG_NO_RICHER_RECORD);
+  }
+  return { changed };
+}
+
+interface EnrichResult {
+  processed: number;
+  enriched: number;
+  fieldsFilled: number;
+  taggedNoDOI: number;
+  taggedNoRicher: number;
+  taggedFailed: number;
+  cancelled: boolean;
+  hadApiErrors: boolean;
+}
+
+async function processEnrichments(
+  items: any[],
+  cancel: CancelToken,
+): Promise<EnrichResult> {
+  const result: EnrichResult = {
+    processed: 0,
+    enriched: 0,
+    fieldsFilled: 0,
+    taggedNoDOI: 0,
+    taggedNoRicher: 0,
+    taggedFailed: 0,
+    cancelled: false,
+    hadApiErrors: false,
+  };
+
+  const progressWin = new Zotero.ProgressWindow({ closeOnClick: false });
+  progressWin.changeHeadline(getString("enrich.progress.title"));
+  progressWin.addLines(
+    getString("enrich.progress.hint"),
+    "chrome://zotero/skin/16/universal/book.svg",
+  );
+  progressWin.show();
+
+  const startTime = Date.now();
+  const total = items.length;
+
+  const updateProgress = () => {
+    progressWin.changeHeadline(
+      getString("enrich.progress.item", {
+        current: result.processed,
+        total,
+        percent: Math.round((result.processed / total) * 100),
+        enriched: result.enriched,
+        fields: result.fieldsFilled,
+        eta: formatEta(startTime, result.processed, total),
+      }),
+    );
+  };
+
+  for (let batchStart = 0; batchStart < total; batchStart += BATCH_SIZE) {
+    if (cancel.requested) {
+      result.cancelled = true;
+      break;
+    }
+
+    const batch = items.slice(batchStart, batchStart + BATCH_SIZE);
+    const batchStartTime = Date.now();
+
+    await Promise.all(
+      batch.map(async (item) => {
+        if (cancel.requested) return;
+        try {
+          const outcome = await enrichItemMetadata(item);
+          if (outcome.noDOI) {
+            result.taggedNoDOI++;
+          } else if (outcome.failed) {
+            result.taggedFailed++;
+          } else if (outcome.changed && outcome.changed.length > 0) {
+            result.enriched++;
+            result.fieldsFilled += outcome.changed.length;
+          } else if (outcome.changed && outcome.changed.length === 0) {
+            result.taggedNoRicher++;
+          }
+        } catch (e) {
+          Zotero.debug(
+            `Metadata Hunter: Error enriching item ${item.id}: ${e}`,
+          );
+          result.hadApiErrors = true;
+          try {
+            await setFailureTag(item, TAG_UPDATE_FAILED);
+            result.taggedFailed++;
+          } catch {
+            // best-effort
+          }
+        }
+
+        result.processed++;
+        updateProgress();
+      }),
+    );
+
+    const isLastBatch = batchStart + BATCH_SIZE >= total;
+    if (!isLastBatch && !cancel.requested) {
+      const elapsed = Date.now() - batchStartTime;
+      const pad = BATCH_MIN_INTERVAL_MS - elapsed;
+      if (pad > 0) await Zotero.Promise.delay(pad);
+    }
+  }
+
+  progressWin.close();
+  return result;
+}
+
+function buildEnrichResultMessage(r: EnrichResult): string {
+  let msg: string;
+
+  if (r.cancelled) {
+    msg = getString("enrich.cancelled", {
+      processed: r.processed,
+      enriched: r.enriched,
+      fields: r.fieldsFilled,
+    });
+  } else if (r.enriched === 0) {
+    msg = getString("enrich.noneEnriched", { total: r.processed });
+  } else {
+    msg = getString("enrich.found", {
+      enriched: r.enriched,
+      fields: r.fieldsFilled,
+      total: r.processed,
+    });
+  }
+
+  if (r.taggedNoDOI > 0) {
+    msg += getString("enrich.taggedNoDOI", {
+      count: r.taggedNoDOI,
+      tag: TAG_NO_DOI,
+    });
+  }
+  if (r.taggedNoRicher > 0) {
+    msg += getString("enrich.taggedNoRicher", {
+      count: r.taggedNoRicher,
+      tag: TAG_NO_RICHER_RECORD,
+    });
+  }
+  if (r.taggedFailed > 0) {
+    msg += getString("enrich.taggedFailed", {
+      count: r.taggedFailed,
+      tag: TAG_UPDATE_FAILED,
+    });
+  }
+  if (r.hadApiErrors) msg += getString("enrich.apiWarning");
+  return msg;
+}
+
+async function runEnrichMetadata(
+  candidates: any[],
+  noneFoundKey: string,
+): Promise<void> {
+  if (activeCancel) return;
+
+  if (candidates.length === 0) {
+    Services.prompt.alert(
+      null,
+      getString("enrich.title"),
+      getString(noneFoundKey),
+    );
+    return;
+  }
+
+  const cancel = new CancelToken();
+  activeCancel = cancel;
+  syncAllToolbarButtons();
+
+  try {
+    const result = await processEnrichments(candidates, cancel);
+    Services.prompt.alert(
+      null,
+      getString("enrich.title"),
+      buildEnrichResultMessage(result),
+    );
+  } finally {
+    activeCancel = null;
+    syncAllToolbarButtons();
+  }
+}
+
+async function enrichMetadata(): Promise<void> {
+  const ZP = Zotero.getActiveZoteroPane();
+  let items: any[] = ZP.getSelectedItems();
+
+  if (items.length === 0) {
+    const collection = ZP.getSelectedCollection();
+    const libraryID = collection
+      ? collection.libraryID
+      : ZP.getSelectedLibraryID();
+    items = collection
+      ? collection.getChildItems()
+      : await Zotero.Items.getAll(libraryID);
+  }
+
+  await runEnrichMetadata(
+    analyzeItemsForEnrichment(items),
+    "enrich.noneEligible",
+  );
+}
+
+async function enrichMetadataForSelected(): Promise<void> {
+  const ZP = Zotero.getActiveZoteroPane();
+  // Right-click action: respect the user's explicit selection rather than
+  // filtering by hasSparseMetadata. Still skip preprints (they have their own
+  // dedicated upgrade flow) and non-regular items.
+  const selected: any[] = ZP.getSelectedItems().filter(isEnrichable);
+  await runEnrichMetadata(selected, "enrich.noneEligibleSelected");
 }
 
 // ── Entry points ───────────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Zotero Metadata Hunter is a Zotero plugin (addon ID: `metadatahunter@federicotorrielli.github.io`) that automatically finds missing DOIs and abstracts for items in a Zotero library, and checks whether preprints have a published conference/journal version. It queries CrossRef, DBLP, Semantic Scholar, arXiv, PubMed, and OpenAlex.
+Zotero Metadata Hunter is a Zotero plugin (addon ID: `metadatahunter@federicotorrielli.github.io`) that automatically finds missing DOIs and abstracts for items in a Zotero library, checks whether preprints have a published conference/journal version, and enriches sparse already-published items (e.g. Google Scholar BibTeX imports) with full metadata pulled from Zotero's own translators. It queries CrossRef, DBLP, Semantic Scholar, arXiv, PubMed, and OpenAlex.
 
 ## Commands
 
@@ -39,13 +39,19 @@ The plugin is TypeScript bundled via esbuild into an IIFE (Firefox 128 target). 
 **Core logic** (`src/index.ts`):
 
 - Sets up `Zotero.MetadataHunter` on the global namespace with lifecycle methods; `bootstrap.js` deletes it on shutdown
-- `onMainWindowLoad` registers menus, toolbar button, and keyboard shortcuts (Ctrl/Cmd+Alt+D and Ctrl/Cmd+Alt+P) per window; `onMainWindowUnload` removes them (required to avoid memory leaks)
+- `onMainWindowLoad` registers menus, toolbar button, and keyboard shortcuts (Ctrl/Cmd+Alt+D, Ctrl/Cmd+Alt+P, and Ctrl/Cmd+Alt+M) per window; `onMainWindowUnload` removes them (required to avoid memory leaks)
 - `findDOIForItem()` tries four sources in order: **CrossRef → DBLP → Semantic Scholar → arXiv**
 - `findAbstractForItem()` races all three abstract sources simultaneously with `Promise.any`: **Semantic Scholar → PubMed → OpenAlex**
 - `processItems()` runs items in parallel batches of 5 with a `CancelToken`; a 300ms minimum inter-batch delay rate-limits API calls
 - `findPublishedDOI()` checks for a published version of a preprint: arXiv direct ID first, then Semantic Scholar + CrossRef + DBLP raced with `Promise.any`
-- `processPreprints()` same batch/cancel/progress pattern as `processItems()`; on success creates a new item via `Zotero.Translate.Search` and trashes the original preprint
+- `processPreprints()` same batch/cancel/progress pattern as `processItems()`; on success creates a new item via `Zotero.Translate.Search`, **re-parents child attachments and notes from the source preprint onto the new item before trashing the source** (Zotero trashes children with their parent, so skipping this step silently loses annotated PDFs once Trash is emptied)
 - All HTTP calls use `Zotero.HTTP.request()` (async, respects Zotero proxy settings)
+
+**Failure tags** (`TAG_NO_DOI`, `TAG_NO_PUBLISHED`, `TAG_UPDATE_FAILED`, `TAG_NO_RICHER_RECORD` at the top of `src/index.ts`): items that can't be resolved get a persistent Zotero tag so users can filter/retry. Tags are cleared automatically on a subsequent successful run — any code path that resolves an item must call the tag-removal helper, or stale failure tags will accumulate.
+
+**Metadata enrichment** (`enrichItemMetadata`, `processEnrichments`, `enrichMetadata`, `enrichMetadataForSelected` in `src/index.ts`): for non-preprint regular items with sparse fields, pulls the canonical record by DOI through `Zotero.Translate.Search` (same machinery as "Add Item by Identifier") and merges fields onto the existing item in place. If the item has no DOI, runs `findDOIForItem` first. Per-field merge policy lives in `enrichItemFromMetadata`: scalar fields like venue/volume/pages/ISSN are fill-missing-only with `Zotero.ItemFields.isValidForType` gating; abstract is replaced when existing is empty or suspiciously short (< 200 chars); creator list is replaced when existing has fewer than 2 entries or is strictly shorter than hydrated with a shared surname; item type is set directly from the translator's choice. `analyzeItemsForEnrichment` filters library-wide runs to items missing at least one of `{publicationTitle, proceedingsTitle, abstractNote, pages, volume}`; right-click runs respect the user's selection but still skip preprints.
+
+**Critical pitfall**: `Zotero.Translate.Search.translate({...})` in `fetchRichRecordByDOI` persists the new item to the user's library (same behavior `processPreprints` relies on). The enrichment path does NOT want a duplicate, so `fetchRichRecordByDOI` runs the translator with `collections: []`, snapshots the scratch's hydrated data into a plain `NormalizedRecord` via `normalizeScratch`, and erases the scratch via `Zotero.Items.erase(scratch.id)` inside `finally` (notifier event NOT suppressed: `translate.translate()` fires `add` events, so the matching `delete` must fire too or the Zotero pane keeps a stale row visible until manual refresh). The order is load-bearing in two ways: (1) the snapshot must run on the live scratch, before the erase, so it relies on the JS semantics that `return normalizeScratch(scratch)` evaluates before `finally` runs; (2) the erase must run before the function returns to the caller, so a duplicate never reaches the user's library. Skipping the erase silently doubles the library; skipping the normalization step (i.e. returning the live scratch and reading from it later) makes the merge depend on undocumented post-erase cache survival.
 
 **DOI source details** (all in `src/index.ts`):
 
