@@ -35,6 +35,18 @@ export function registerWindowMenus(win: Window, rootURI: string) {
       );
       toolsMenu.appendChild(menuitem);
     }
+
+    if (!doc.getElementById(`${config.addonRef}-tools-menu-enrich`)) {
+      const menuitem = doc.createXULElement("menuitem");
+      menuitem.id = `${config.addonRef}-tools-menu-enrich`;
+      menuitem.className = "menuitem-iconic";
+      menuitem.setAttribute("label", getString("enrich.menu.library"));
+      menuitem.setAttribute("image", metadataIcon);
+      menuitem.addEventListener("command", () =>
+        Zotero.MetadataHunter.enrichMetadata(),
+      );
+      toolsMenu.appendChild(menuitem);
+    }
   }
 
   const itemMenu = doc.getElementById("zotero-itemmenu");
@@ -67,12 +79,30 @@ export function registerWindowMenus(win: Window, rootURI: string) {
       itemMenu.appendChild(preprintItem);
     }
 
+    let enrichItem: any = doc.getElementById(
+      `${config.addonRef}-item-menu-enrich`,
+    );
+    if (!enrichItem) {
+      enrichItem = doc.createXULElement("menuitem");
+      enrichItem.id = `${config.addonRef}-item-menu-enrich`;
+      enrichItem.className = "menuitem-iconic";
+      enrichItem.setAttribute("label", getString("enrich.menu.selected"));
+      enrichItem.setAttribute("image", metadataIcon);
+      enrichItem.addEventListener("command", () =>
+        Zotero.MetadataHunter.enrichMetadataForSelected(),
+      );
+      itemMenu.appendChild(enrichItem);
+    }
+
     const onShowing = () => {
       const ZP = Zotero.getActiveZoteroPane();
       const selected: any[] = ZP?.getSelectedItems() ?? [];
       doiItem.hidden = !selected.some((item: any) => item.isRegularItem());
       preprintItem.hidden = !selected.some((item: any) =>
         Zotero.MetadataHunter.isPreprint(item),
+      );
+      enrichItem.hidden = !selected.some((item: any) =>
+        Zotero.MetadataHunter.isEnrichable(item),
       );
     };
     itemMenu.addEventListener("popupshowing", onShowing);
@@ -84,8 +114,10 @@ export function unregisterWindowMenus(win: Window) {
   const doc = (win as any).document;
   doc.getElementById(`${config.addonRef}-tools-menu`)?.remove();
   doc.getElementById(`${config.addonRef}-tools-menu-preprint`)?.remove();
+  doc.getElementById(`${config.addonRef}-tools-menu-enrich`)?.remove();
   doc.getElementById(`${config.addonRef}-item-menu`)?.remove();
   doc.getElementById(`${config.addonRef}-item-menu-preprint`)?.remove();
+  doc.getElementById(`${config.addonRef}-item-menu-enrich`)?.remove();
 
   const listener = itemMenuListeners.get(win);
   if (listener) {
