@@ -19,9 +19,12 @@ jobs:
         with:
           node-version: "24"
 
-      - uses: pnpm/action-setup@v5
+      - uses: pnpm/action-setup@v6
         with:
           version: latest
+
+      - name: Approve pnpm dependency builds
+        run: pnpm approve-builds
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
