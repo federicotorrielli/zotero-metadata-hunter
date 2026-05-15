@@ -31,6 +31,12 @@
     "url": "https://github.com/federicotorrielli/zotero-metadata-hunter/issues"
   },
   "homepage": "https://github.com/federicotorrielli/zotero-metadata-hunter#readme",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "es5-ext",
+      "esbuild"
+    ]
+  },
   "devDependencies": {
     "@types/node": "^25.8.0",
     "@typescript-eslint/eslint-plugin": "^8.59.3",
