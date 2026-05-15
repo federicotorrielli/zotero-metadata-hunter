@@ -248,10 +248,16 @@ function cleanTitleForQuery(title: string): string {
 function isTitleMatch(title1: string, title2: string): boolean {
   if (!title1 || !title2) return false;
 
+  // NFKD decomposes accented letters into base + combining mark, then we drop
+  // anything that isn't a letter, number, or whitespace. Without the unicode
+  // class \p{L} (and the u flag), the ASCII-only \w would erase every non-ASCII
+  // letter, so titles like "Über die Maschine" would collapse to "ber die
+  // maschine" and stop matching their own restored form.
   const normalize = (s: string) =>
     s
+      .normalize("NFKD")
       .toLowerCase()
-      .replace(/[^\w\s]/g, "")
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
       .replace(/\s+/g, " ")
       .trim();
 
@@ -309,12 +315,22 @@ interface DOIResult {
   abstract: string | null;
 }
 
+// Return the first author lastName usable as a query filter, skipping
+// institutional creators (fieldMode: 1) that carry `name` but no `lastName`.
+// Some BibTeX imports put an institution as creator 0, so without this fallback
+// the author filter would be silently dropped instead of using a real person.
+function firstAuthorLastName(item: any): string | null {
+  for (const c of item.getCreators() ?? []) {
+    if (c.lastName && String(c.lastName).trim()) return String(c.lastName);
+  }
+  return null;
+}
+
 async function findDOIFromCrossRef(
   item: any,
   title: string,
 ): Promise<DOIResult | null> {
-  const creators = item.getCreators();
-  const lastName = creators.length > 0 ? creators[0].lastName : null;
+  const lastName = firstAuthorLastName(item);
   const year = item.getField("date")?.match(/\d{4}/)?.[0];
   const titleParam = `query.bibliographic=${encodeURIComponent(cleanTitleForQuery(title))}`;
 
@@ -368,11 +384,8 @@ async function findDOIFromDBLP(
   title: string,
 ): Promise<DOIResult | null> {
   const queryWords = cleanTitleForQuery(title).replace(/\s+/g, " ").trim();
-  const creators = item.getCreators();
-  const authorSuffix =
-    creators.length > 0 && creators[0].lastName
-      ? ` ${creators[0].lastName}`
-      : "";
+  const lastName = firstAuthorLastName(item);
+  const authorSuffix = lastName ? ` ${lastName}` : "";
 
   const q = encodeURIComponent(queryWords + authorSuffix);
   const url = `https://dblp.org/search/publ/api?q=${q}&format=json&h=5&c=0`;
@@ -435,11 +448,10 @@ async function findDOIFromArXiv(
   title: string,
 ): Promise<DOIResult | null> {
   const cleanTitle = cleanTitleForQuery(title).replace(/\s+/g, "+");
-  const creators = item.getCreators();
-  const authorPart =
-    creators.length > 0 && creators[0].lastName
-      ? `+AND+au:${encodeURIComponent(creators[0].lastName)}`
-      : "";
+  const lastName = firstAuthorLastName(item);
+  const authorPart = lastName
+    ? `+AND+au:${encodeURIComponent(lastName)}`
+    : "";
 
   const url = `https://export.arxiv.org/api/query?search_query=ti:${cleanTitle}${authorPart}&max_results=5&sortBy=relevance`;
 
@@ -504,6 +516,14 @@ async function findDOIFromSemanticScholar(
 }
 
 // Try sources in priority order: CrossRef → DBLP → Semantic Scholar → arXiv.
+//
+// For non-preprint items (conferencePaper, journalArticle, ...) we reject any
+// arXiv preprint DOI (10.48550/arXiv.*) from every source. Otherwise the
+// cascade can plug a preprint identifier onto a published paper (common when
+// the real venue, e.g. OpenReview or older PMLR, issues no DOI) and downstream
+// enrichment would later resolve that DOI back to a preprint record and
+// silently demote the item. Preprint items keep the existing behavior so they
+// can be assigned their canonical arXiv DOI when missing.
 async function findDOIForItem(item: any): Promise<DOIResult | null> {
   const doi = item.getField("DOI")?.trim();
   if (!item.isRegularItem() || (doi && doi !== "-")) return null;
@@ -511,11 +531,15 @@ async function findDOIForItem(item: any): Promise<DOIResult | null> {
   const title = item.getField("title");
   if (!title) return null;
 
+  const requirePublished = !isPreprint(item);
+  const accept = (r: DOIResult | null): DOIResult | null =>
+    r && (!requirePublished || isPublishedDOI(r.doi)) ? r : null;
+
   return (
-    (await findDOIFromCrossRef(item, title)) ??
-    (await findDOIFromDBLP(item, title)) ??
-    (await findDOIFromSemanticScholar(item, title)) ??
-    (await findDOIFromArXiv(item, title))
+    accept(await findDOIFromCrossRef(item, title)) ??
+    accept(await findDOIFromDBLP(item, title)) ??
+    accept(await findDOIFromSemanticScholar(item, title)) ??
+    accept(await findDOIFromArXiv(item, title))
   );
 }
 
@@ -727,6 +751,12 @@ async function processItems(
               await setFailureTag(item, TAG_NO_DOI);
               result.taggedNoDOI++;
             }
+          } else {
+            // Item already has a DOI but may carry a stale TAG_NO_DOI from an
+            // earlier run that failed before the DOI was added (e.g. user
+            // edited it in manually). Clear it so failure-tag filters don't
+            // surface this item indefinitely.
+            await clearFailureTags(item, [TAG_NO_DOI]);
           }
 
           if (doi && doi !== "-") {
@@ -959,8 +989,7 @@ async function findPublishedDOIFromCrossRef(
   item: any,
   title: string,
 ): Promise<string | null> {
-  const creators = item.getCreators();
-  const lastName = creators.length > 0 ? creators[0].lastName : null;
+  const lastName = firstAuthorLastName(item);
   const titleParam = `query.bibliographic=${encodeURIComponent(cleanTitleForQuery(title))}`;
   const params = [titleParam];
   if (lastName) params.push(`query.author=${encodeURIComponent(lastName)}`);
@@ -990,11 +1019,8 @@ async function findPublishedRefFromDBLP(
   title: string,
 ): Promise<PublishedRef | null> {
   const queryWords = cleanTitleForQuery(title).replace(/\s+/g, " ").trim();
-  const creators = item.getCreators();
-  const authorSuffix =
-    creators.length > 0 && creators[0].lastName
-      ? ` ${creators[0].lastName}`
-      : "";
+  const lastName = firstAuthorLastName(item);
+  const authorSuffix = lastName ? ` ${lastName}` : "";
 
   const q = encodeURIComponent(queryWords + authorSuffix);
   const url = `https://dblp.org/search/publ/api?q=${q}&format=json&h=5&c=0`;
@@ -1640,10 +1666,39 @@ async function enrichItemMetadata(item: any): Promise<EnrichOutcome> {
   }
 
   if (!doi) return { failed: true };
+
+  // An arXiv DOI on a non-preprint item resolves only to the preprint record,
+  // which would silently demote the item type and overwrite venue/creators
+  // with preprint data (the "linear representation hypothesis" regression).
+  // Try to upgrade to a real published DOI first; this covers Scholar BibTeX
+  // imports that landed a conference paper with the arXiv DOI as its only ID.
+  // If no real DOI exists (OpenReview-only venues etc.), bail rather than
+  // regress; the user can run the preprint flow or fix the DOI manually.
+  if (!isPublishedDOI(doi)) {
+    const upgraded = await findPublishedDOI(item);
+    if (upgraded && "doi" in upgraded && isPublishedDOI(upgraded.doi)) {
+      item.setField("DOI", upgraded.doi);
+      await item.saveTx();
+      doi = upgraded.doi;
+    } else {
+      await setFailureTag(item, TAG_NO_RICHER_RECORD);
+      return { changed: [] };
+    }
+  }
+
   const payload = await fetchRichRecordByDOI(doi, item);
   if (!payload) {
     await setFailureTag(item, TAG_UPDATE_FAILED);
     return { failed: true };
+  }
+
+  // Defence in depth against demotion: even with a non-arXiv DOI the hydrated
+  // record can still come back as itemType=preprint (some preprint servers
+  // register DOIs with CrossRef). We already established the source is
+  // published via isEnrichable; refuse the merge rather than demote.
+  if (payload.itemType === "preprint") {
+    await setFailureTag(item, TAG_NO_RICHER_RECORD);
+    return { changed: [] };
   }
 
   const { changed } = enrichItemFromMetadata(item, payload);
