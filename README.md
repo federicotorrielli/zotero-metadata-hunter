@@ -87,7 +87,7 @@ A tag is automatically removed on a later run if the item is resolved successful
 **Preprint published-version lookup** (sources tried in order):
 
 1. **arXiv direct ID** — fetches the specific arXiv entry and extracts `<arxiv:doi>` (the journal DOI the author reported); most authoritative when present
-2. **Semantic Scholar, CrossRef, DBLP** — raced in parallel with `Promise.any`; result must have a non-arXiv DOI and a non-preprint venue to count
+2. **Semantic Scholar, CrossRef, DBLP, OpenReview** — raced in parallel with `Promise.any`; DOI results must have a non-arXiv DOI and a non-preprint venue to count. OpenReview can return an accepted forum URL for DOI-less venue records such as NeurIPS/ICLR/TMLR papers, while rejected/withdrawn/submitted records are ignored.
 
 **Title matching**: candidates are verified with fuzzy matching (Levenshtein similarity ≥ 0.85), gated by a ≤15% length-difference check that applies to both substring and similarity checks.
 

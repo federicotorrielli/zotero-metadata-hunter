@@ -1070,6 +1070,69 @@ async function findPublishedRefFromDBLP(
   return null;
 }
 
+function openReviewContentValue(note: any, field: string): string {
+  const raw = note?.content?.[field];
+  const value =
+    raw && typeof raw === "object" && "value" in raw ? raw.value : raw;
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function isPublishedOpenReviewVenue(venue: string, venueId: string): boolean {
+  const combined = `${venue} ${venueId}`.toLowerCase();
+  if (!combined.trim()) return false;
+
+  const unpublishedMarkers = [
+    "submitted to",
+    "under review",
+    "rejected",
+    "withdrawn",
+    "desk rejected",
+    "desk_rejected",
+  ];
+  if (unpublishedMarkers.some((marker) => combined.includes(marker))) {
+    return false;
+  }
+
+  return isPublishedVenue(venue || venueId);
+}
+
+async function findPublishedRefFromOpenReview(
+  title: string,
+): Promise<PublishedRef | null> {
+  const query = encodeURIComponent(cleanTitleForQuery(title));
+  const url = `https://api2.openreview.net/notes/search?term=${query}&content=title&type=exact&source=forum&limit=10`;
+
+  try {
+    const response: any = await withTimeout(
+      Zotero.HTTP.request("GET", url, {
+        headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
+      }),
+      10_000,
+    );
+    const data = JSON.parse(response.responseText);
+
+    for (const note of data.notes ?? []) {
+      const noteTitle = openReviewContentValue(note, "title");
+      if (!isTitleMatch(title, noteTitle)) continue;
+
+      const venue = openReviewContentValue(note, "venue");
+      const venueId = openReviewContentValue(note, "venueid");
+      if (!isPublishedOpenReviewVenue(venue, venueId)) continue;
+
+      const forum = note.forum || note.id;
+      if (forum) {
+        return {
+          url: `https://openreview.net/forum?id=${encodeURIComponent(forum)}`,
+        };
+      }
+    }
+  } catch (e) {
+    Zotero.debug(`Metadata Hunter: OpenReview preprint lookup failed: ${e}`);
+  }
+
+  return null;
+}
+
 async function findPublishedDOI(item: any): Promise<PublishedRef | null> {
   const title = item.getField("title");
   if (!title) return null;
@@ -1080,7 +1143,7 @@ async function findPublishedDOI(item: any): Promise<PublishedRef | null> {
     if (doi) return { doi };
   }
 
-  // Race all three fallback sources — first non-null result wins,
+  // Race fallback sources — first non-null result wins,
   // same pattern as findAbstractForItem.
   try {
     return await Promise.any([
@@ -1102,6 +1165,9 @@ async function findPublishedDOI(item: any): Promise<PublishedRef | null> {
       ),
       withNullAsReject(
         withTimeout(findPublishedRefFromDBLP(item, title), 10_000),
+      ),
+      withNullAsReject(
+        withTimeout(findPublishedRefFromOpenReview(title), 10_000),
       ),
     ]);
   } catch {
