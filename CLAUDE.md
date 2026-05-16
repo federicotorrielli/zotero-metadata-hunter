@@ -43,7 +43,7 @@ The plugin is TypeScript bundled via esbuild into an IIFE (Firefox 128 target). 
 - `findDOIForItem()` tries four sources in order: **CrossRef → DBLP → Semantic Scholar → arXiv**
 - `findAbstractForItem()` races all three abstract sources simultaneously with `Promise.any`: **Semantic Scholar → PubMed → OpenAlex**
 - `processItems()` runs items in parallel batches of 5 with a `CancelToken`; a 300ms minimum inter-batch delay rate-limits API calls
-- `findPublishedDOI()` checks for a published version of a preprint: arXiv direct ID first, then Semantic Scholar + CrossRef + DBLP raced with `Promise.any`
+- `findPublishedDOI()` checks for a published version of a preprint: arXiv direct ID first, then Semantic Scholar + CrossRef + DBLP + OpenReview raced with `Promise.any`
 - `processPreprints()` same batch/cancel/progress pattern as `processItems()`; on success creates a new item via `Zotero.Translate.Search`, **re-parents child attachments and notes from the source preprint onto the new item before trashing the source** (Zotero trashes children with their parent, so skipping this step silently loses annotated PDFs once Trash is emptied)
 - All HTTP calls use `Zotero.HTTP.request()` (async, respects Zotero proxy settings)
 
@@ -73,7 +73,7 @@ The plugin is TypeScript bundled via esbuild into an IIFE (Firefox 128 target). 
 
 **Preprint detection** (`isPreprint`): item type `preprint`, URL containing `arxiv.org`, DOI starting with `10.48550/arXiv.`, or `arXiv:` in the Extra field. `extractArxivId()` parses the ID from those same fields and is reused by both `isPreprint` and `findPublishedDOI`.
 
-**Published venue validation**: results are only accepted if the DOI doesn't start with `10.48550/arXiv.` and the venue is not in the `PREPRINT_VENUES` blocklist (arXiv, CoRR, SSRN, bioRxiv, medRxiv, etc.). CrossRef results must also have type `journal-article`, `proceedings-article`, or `book-chapter` (checked via `PUBLISHED_CROSSREF_TYPES` Set).
+**Published venue validation**: results are only accepted if the DOI doesn't start with `10.48550/arXiv.` and the venue is not in the `PREPRINT_VENUES` blocklist (arXiv, CoRR, SSRN, bioRxiv, medRxiv, etc.). CrossRef results must also have type `journal-article`, `proceedings-article`, or `book-chapter` (checked via `PUBLISHED_CROSSREF_TYPES` Set). OpenReview results return forum URLs instead of DOIs and additionally reject unpublished status markers such as `submitted to`, `under review`, `rejected`, and `withdrawn`.
 
 **UI layer**:
 
