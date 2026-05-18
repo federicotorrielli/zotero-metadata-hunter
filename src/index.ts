@@ -1077,6 +1077,29 @@ function openReviewContentValue(note: any, field: string): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+// DBLP imports thin metadata records into OpenReview for both arXiv preprints
+// (venue "CoRR YYYY") and published venues (e.g. "Trans. Mach. Learn. Res. 2022").
+// These forums carry no PDF, no reviews, and no abstract beyond what DBLP held,
+// so Zotero's web translator extracts almost nothing from them: the resulting
+// item is a near-empty webpage record. The real OpenReview submission for an
+// accepted paper lives under a separate forum with venueid like "TMLR" or
+// "ICLR.cc/2025/Conference" and invitations rooted at the venue host.
+// OpenReview docs mark DBLP-sourced records with invitations starting at
+// "DBLP.org/-/Record"; the venueid mirror "dblp.org/..." is a second tell.
+function isDblpMirrorNote(note: any): boolean {
+  const venueId = openReviewContentValue(note, "venueid").toLowerCase();
+  if (venueId.startsWith("dblp.org/")) return true;
+  const invitations: unknown = note?.invitations;
+  if (Array.isArray(invitations)) {
+    for (const inv of invitations) {
+      if (typeof inv === "string" && inv.toLowerCase().startsWith("dblp.org/")) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function isPublishedOpenReviewVenue(venue: string, venueId: string): boolean {
   const combined = `${venue} ${venueId}`.toLowerCase();
   if (!combined.trim()) return false;
@@ -1093,14 +1116,24 @@ function isPublishedOpenReviewVenue(venue: string, venueId: string): boolean {
     return false;
   }
 
-  return isPublishedVenue(venue || venueId);
+  // Word-boundary preprint check so year-suffixed labels like "CoRR 2023" or
+  // "arXiv 2024" are still rejected. The exact-match isPublishedVenue() used
+  // elsewhere is too narrow here because OpenReview always appends the year.
+  for (const preprintVenue of PREPRINT_VENUES) {
+    const escaped = preprintVenue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`\\b${escaped}\\b`, "i").test(combined)) return false;
+  }
+
+  return Boolean(venue.trim() || venueId.trim());
 }
 
 async function findPublishedRefFromOpenReview(
   title: string,
 ): Promise<PublishedRef | null> {
   const query = encodeURIComponent(cleanTitleForQuery(title));
-  const url = `https://api2.openreview.net/notes/search?term=${query}&content=title&type=exact&source=forum&limit=10`;
+  // limit=25 (up from 10) because DBLP mirrors often saturate the top results
+  // and we filter them out; the real submission may sit further down the list.
+  const url = `https://api2.openreview.net/notes/search?term=${query}&content=title&type=exact&source=forum&limit=25`;
 
   try {
     const response: any = await withTimeout(
@@ -1114,6 +1147,8 @@ async function findPublishedRefFromOpenReview(
     for (const note of data.notes ?? []) {
       const noteTitle = openReviewContentValue(note, "title");
       if (!isTitleMatch(title, noteTitle)) continue;
+
+      if (isDblpMirrorNote(note)) continue;
 
       const venue = openReviewContentValue(note, "venue");
       const venueId = openReviewContentValue(note, "venueid");

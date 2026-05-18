@@ -37,10 +37,23 @@ jobs:
           echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
           echo "addon_id=$(node -p "require('./package.json').config.addonID")" >> $GITHUB_OUTPUT
 
+      # Use the tagged commit's full message (subject + body) as the release
+      # body so the actual fix/feature explanation surfaces in the release,
+      # not just the commit subject line that generate_release_notes lists.
+      - name: Read commit message for release body
+        id: notes
+        run: |
+          {
+            echo 'body<<RELEASE_EOF'
+            git log -1 --pretty=%B "${GITHUB_SHA}"
+            echo 'RELEASE_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           name: "v${{ steps.meta.outputs.version }}"
+          body: ${{ steps.notes.outputs.body }}
           generate_release_notes: true
           files: build/${{ steps.meta.outputs.addon_id }}-${{ steps.meta.outputs.version }}.xpi
 
