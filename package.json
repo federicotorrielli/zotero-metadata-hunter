@@ -11,6 +11,7 @@
     "prefsPrefix": "extensions.zotero.metadatahunter"
   },
   "main": "src/index.ts",
+  "license": "EUPL-1.2",
   "scripts": {
     "build": "tsc --noEmit && node scripts/build.mjs production",
     "start": "node scripts/start.mjs",
@@ -39,13 +40,13 @@
     ]
   },
   "devDependencies": {
-    "@types/node": "^25.8.0",
-    "@typescript-eslint/eslint-plugin": "^8.59.3",
-    "@typescript-eslint/parser": "^8.59.3",
+    "@types/node": "^25.9.1",
+    "@typescript-eslint/eslint-plugin": "^8.59.4",
+    "@typescript-eslint/parser": "^8.59.4",
     "chokidar": "^5.0.0",
     "compressing": "^2.1.1",
     "esbuild": "^0.28.0",
-    "eslint": "^10.3.0",
+    "eslint": "^10.4.0",
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.8.3",
     "release-it": "^20.0.1",
