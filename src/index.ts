@@ -449,9 +449,7 @@ async function findDOIFromArXiv(
 ): Promise<DOIResult | null> {
   const cleanTitle = cleanTitleForQuery(title).replace(/\s+/g, "+");
   const lastName = firstAuthorLastName(item);
-  const authorPart = lastName
-    ? `+AND+au:${encodeURIComponent(lastName)}`
-    : "";
+  const authorPart = lastName ? `+AND+au:${encodeURIComponent(lastName)}` : "";
 
   const url = `https://export.arxiv.org/api/query?search_query=ti:${cleanTitle}${authorPart}&max_results=5&sortBy=relevance`;
 
@@ -1077,6 +1075,32 @@ function openReviewContentValue(note: any, field: string): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+// OpenReview wraps list fields the same way as scalars (api2 nests under
+// `.value`, api1 stores the array directly). Returns the non-empty trimmed
+// string entries, ignoring any non-string members.
+function openReviewContentList(note: any, field: string): string[] {
+  const raw = note?.content?.[field];
+  const value =
+    raw && typeof raw === "object" && !Array.isArray(raw) && "value" in raw
+      ? raw.value
+      : raw;
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+// A note carrying a title but no authors yields an item with just the name and
+// no creators once the web translator runs over its forum. Reject those so the
+// preprint never gets "upgraded" to an authorless published record.
+function openReviewNoteHasAuthors(note: any): boolean {
+  return (
+    openReviewContentList(note, "authors").length > 0 ||
+    openReviewContentList(note, "authorids").length > 0
+  );
+}
+
 // DBLP imports thin metadata records into OpenReview for both arXiv preprints
 // (venue "CoRR YYYY") and published venues (e.g. "Trans. Mach. Learn. Res. 2022").
 // These forums carry no PDF, no reviews, and no abstract beyond what DBLP held,
@@ -1092,7 +1116,10 @@ function isDblpMirrorNote(note: any): boolean {
   const invitations: unknown = note?.invitations;
   if (Array.isArray(invitations)) {
     for (const inv of invitations) {
-      if (typeof inv === "string" && inv.toLowerCase().startsWith("dblp.org/")) {
+      if (
+        typeof inv === "string" &&
+        inv.toLowerCase().startsWith("dblp.org/")
+      ) {
         return true;
       }
     }
@@ -1153,6 +1180,10 @@ async function findPublishedRefFromOpenReview(
       const venue = openReviewContentValue(note, "venue");
       const venueId = openReviewContentValue(note, "venueid");
       if (!isPublishedOpenReviewVenue(venue, venueId)) continue;
+
+      // Anonymized or thin notes carry a title but no authors; the web
+      // translator would produce a creatorless item, so reject them here.
+      if (!openReviewNoteHasAuthors(note)) continue;
 
       const forum = note.forum || note.id;
       if (forum) {
@@ -1579,7 +1610,8 @@ function normalizeScratch(scratch: any): NormalizedRecord {
   for (const name of candidateFields) {
     const fieldID = Zotero.ItemFields.getID(name);
     if (!fieldID) continue;
-    if (!Zotero.ItemFields.isValidForType(fieldID, scratch.itemTypeID)) continue;
+    if (!Zotero.ItemFields.isValidForType(fieldID, scratch.itemTypeID))
+      continue;
     try {
       const v = scratch.getField(name);
       if (v != null && String(v).trim()) fields[name] = String(v);
