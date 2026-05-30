@@ -1,0 +1,14 @@
+# pnpm v11 no longer reads the "pnpm" field from package.json. Build-script
+# settings moved here, and onlyBuiltDependencies was replaced by the allowBuilds
+# map (package -> boolean). v11 also turns an un-allowed build into a hard
+# ERR_PNPM_IGNORED_BUILDS error, so every dependency that needs its postinstall
+# must be listed here or "pnpm install --frozen-lockfile" fails in CI.
+allowBuilds:
+  es5-ext: true
+  esbuild: true
+
+# v11 defaults blockExoticSubdeps to true, which forbids transitive deps from
+# git/tarball sources. zotero-types pulls Zotero's own pinned git forks of
+# epubjs and pdfjs-dist as subdeps (not the registry packages), so the build
+# cannot install with this on. v10 allowed it implicitly; restore that.
+blockExoticSubdeps: false
