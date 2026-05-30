@@ -1336,12 +1336,36 @@ async function migrateChildrenToItem(
   return migrated;
 }
 
+// Bare imports (Google Scholar BibTeX, RIS, manual entry) often land arXiv
+// preprints as Zotero's generic "document" type, which carries no real type
+// semantics. Once the preprint action confirms such an item is a preprint but
+// finds no published version to replace it with, promote it from "document" to
+// the proper "preprint" type so it is categorised correctly. Zotero remaps base
+// fields (title, date, url, abstract, creators) across the type change, so no
+// metadata is lost. Returns true only when an actual conversion happened.
+async function promoteDocumentToPreprint(item: any): Promise<boolean> {
+  if (item.itemType !== "document") return false;
+  const preprintTypeID = Zotero.ItemTypes.getID("preprint");
+  if (!preprintTypeID || item.itemTypeID === preprintTypeID) return false;
+  try {
+    item.setType(preprintTypeID);
+    await item.saveTx();
+    return true;
+  } catch (e) {
+    Zotero.debug(
+      `Metadata Hunter: Failed to promote document ${item.id} to preprint: ${e}`,
+    );
+    return false;
+  }
+}
+
 interface PreprintResult {
   found: number;
   checked: number;
   migratedChildren: number;
   taggedNoPublished: number;
   taggedFailed: number;
+  convertedToPreprint: number;
   cancelled: boolean;
   hadApiErrors: boolean;
 }
@@ -1356,6 +1380,7 @@ async function processPreprints(
     migratedChildren: 0,
     taggedNoPublished: 0,
     taggedFailed: 0,
+    convertedToPreprint: 0,
     cancelled: false,
     hadApiErrors: false,
   };
@@ -1397,24 +1422,30 @@ async function processPreprints(
         if (cancel.requested) return;
         try {
           const ref = await findPublishedDOI(item);
-          if (!ref) {
-            await setFailureTag(item, TAG_NO_PUBLISHED);
-            result.taggedNoPublished++;
+          const newItem = ref ? await createItemFromPublished(ref, item) : null;
+
+          if (newItem) {
+            // Re-parent child attachments and notes BEFORE trashing the source,
+            // otherwise Zotero sends them to Trash along with the preprint parent.
+            result.migratedChildren += await migrateChildrenToItem(
+              item,
+              newItem,
+            );
+            item.deleted = true;
+            await item.saveTx();
+            result.found++;
           } else {
-            const newItem = await createItemFromPublished(ref, item);
-            if (newItem) {
-              // Re-parent child attachments and notes BEFORE trashing the source,
-              // otherwise Zotero sends them to Trash along with the preprint parent.
-              result.migratedChildren += await migrateChildrenToItem(
-                item,
-                newItem,
-              );
-              item.deleted = true;
-              await item.saveTx();
-              result.found++;
-            } else {
+            // No published version replaced the source. If it is a bare
+            // "document", at least promote it to the proper preprint type.
+            if (await promoteDocumentToPreprint(item)) {
+              result.convertedToPreprint++;
+            }
+            if (ref) {
               await setFailureTag(item, TAG_UPDATE_FAILED);
               result.taggedFailed++;
+            } else {
+              await setFailureTag(item, TAG_NO_PUBLISHED);
+              result.taggedNoPublished++;
             }
           }
         } catch (e) {
@@ -1467,6 +1498,11 @@ function buildPreprintResultMessage(r: PreprintResult): string {
   if (r.migratedChildren > 0) {
     msg += getString("preprint.migratedChildren", {
       count: r.migratedChildren,
+    });
+  }
+  if (r.convertedToPreprint > 0) {
+    msg += getString("preprint.convertedToPreprint", {
+      count: r.convertedToPreprint,
     });
   }
   if (r.taggedNoPublished > 0) {
