@@ -43,6 +43,8 @@ export function getString(
       "Found published versions for ${found} of ${total} preprint(s). New items have been added and originals moved to trash.",
     "preprint.migratedChildren":
       "\n\nMoved ${count} attachment(s)/note(s) from the preprint(s) onto the new published item(s).",
+    "preprint.convertedToPreprint":
+      '\n\nConverted ${count} generic "document" item(s) to the proper preprint type.',
     "preprint.taggedNoPublished":
       '\n\n${count} preprint(s) tagged with "${tag}" — filter by this tag to review them.',
     "preprint.taggedFailed":
