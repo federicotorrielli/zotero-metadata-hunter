@@ -1,7 +1,7 @@
 {
   "name": "zotero-metadata-hunter",
   "version": "0.4.1",
-  "packageManager": "pnpm@10.33.0",
+  "packageManager": "pnpm@11.5.0",
   "description": "A Zotero plugin to find and add missing DOI numbers and abstracts to references",
   "config": {
     "addonName": "Metadata Hunter",
@@ -33,23 +33,17 @@
     "url": "https://github.com/federicotorrielli/zotero-metadata-hunter/issues"
   },
   "homepage": "https://github.com/federicotorrielli/zotero-metadata-hunter#readme",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "es5-ext",
-      "esbuild"
-    ]
-  },
   "devDependencies": {
     "@types/node": "^25.9.1",
-    "@typescript-eslint/eslint-plugin": "^8.59.4",
-    "@typescript-eslint/parser": "^8.59.4",
+    "@typescript-eslint/eslint-plugin": "^8.60.0",
+    "@typescript-eslint/parser": "^8.60.0",
     "chokidar": "^5.0.0",
     "compressing": "^2.1.1",
     "esbuild": "^0.28.0",
-    "eslint": "^10.4.0",
+    "eslint": "10.4.0",
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.8.3",
-    "release-it": "^20.0.1",
+    "release-it": "~20.0.1",
     "replace-in-file": "^8.4.0",
     "typescript": "^6.0.3",
     "zotero-types": "^4.1.2"
