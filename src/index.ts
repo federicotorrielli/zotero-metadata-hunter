@@ -1,5 +1,6 @@
 import { config, version } from "../package.json";
 import { registerWindowMenus, unregisterWindowMenus } from "./modules/menu";
+import { createProgressPanel, showResultPanel } from "./modules/progress";
 import { getString } from "./utils/locale";
 
 declare const Zotero: any;
@@ -56,6 +57,14 @@ Zotero.MetadataHunter = {
   async startup(data: { id: string; version: string; rootURI: string }) {
     Zotero.debug("Metadata Hunter: Startup");
     pluginRootURI = data.rootURI;
+    // Zotero auto-unregisters the pane on plugin shutdown.
+    Zotero.PreferencePanes?.register?.({
+      pluginID: data.id,
+      id: `${config.addonRef}-prefs`,
+      label: config.addonName,
+      src: pluginRootURI + "preferences.xhtml",
+      scripts: [pluginRootURI + "preferences.js"],
+    });
     for (const win of Zotero.getMainWindows()) {
       Zotero.MetadataHunter.onMainWindowLoad(win);
     }
@@ -675,7 +684,19 @@ interface ProcessResult {
   hadApiErrors: boolean;
 }
 
-const BATCH_SIZE = 5;
+const DEFAULT_BATCH = 5;
+const BATCH_PREF = `${config.prefsPrefix}.batchSize`;
+
+// Parallel items per batch, configurable (1-12) via the preferences pane.
+function resolveBatchSize(): number {
+  try {
+    const v = Services.prefs.getIntPref(BATCH_PREF, DEFAULT_BATCH);
+    return Math.min(Math.max(v, 1), 12);
+  } catch {
+    return DEFAULT_BATCH;
+  }
+}
+
 // Minimum time between batch starts. If a batch resolves faster than this
 // (all items cached / already processed), we pad to avoid hammering APIs.
 const BATCH_MIN_INTERVAL_MS = 300;
@@ -693,19 +714,18 @@ async function processItems(
     hadApiErrors: false,
   };
 
-  const progressWin = new Zotero.ProgressWindow({ closeOnClick: false });
-  progressWin.changeHeadline(getString("findDOI.progress.title"));
-  progressWin.addLines(
+  const batchSize = resolveBatchSize();
+  const panel = createProgressPanel(
+    getString("findDOI.progress.title"),
     getString("findDOI.progress.hint"),
-    "chrome://zotero/skin/16/universal/book.svg",
   );
-  progressWin.show();
 
   const startTime = Date.now();
   const total = items.length;
 
   const updateProgress = () => {
-    progressWin.changeHeadline(
+    panel.update(
+      (result.processed / total) * 100,
       getString("findDOI.progress.item", {
         current: result.processed,
         total,
@@ -717,13 +737,13 @@ async function processItems(
     );
   };
 
-  for (let batchStart = 0; batchStart < total; batchStart += BATCH_SIZE) {
+  for (let batchStart = 0; batchStart < total; batchStart += batchSize) {
     if (cancel.requested) {
       result.cancelled = true;
       break;
     }
 
-    const batch = items.slice(batchStart, batchStart + BATCH_SIZE);
+    const batch = items.slice(batchStart, batchStart + batchSize);
     const batchStartTime = Date.now();
 
     await Promise.all(
@@ -784,7 +804,7 @@ async function processItems(
 
     // Pad to BATCH_MIN_INTERVAL_MS only if there are more items coming,
     // so we never delay after the final batch.
-    const isLastBatch = batchStart + BATCH_SIZE >= total;
+    const isLastBatch = batchStart + batchSize >= total;
     if (!isLastBatch && !cancel.requested) {
       const elapsed = Date.now() - batchStartTime;
       const pad = BATCH_MIN_INTERVAL_MS - elapsed;
@@ -792,7 +812,7 @@ async function processItems(
     }
   }
 
-  progressWin.close();
+  panel.close();
   return result;
 }
 
@@ -1385,19 +1405,18 @@ async function processPreprints(
     hadApiErrors: false,
   };
 
-  const progressWin = new Zotero.ProgressWindow({ closeOnClick: false });
-  progressWin.changeHeadline(getString("preprint.progress.title"));
-  progressWin.addLines(
+  const batchSize = resolveBatchSize();
+  const panel = createProgressPanel(
+    getString("preprint.progress.title"),
     getString("preprint.progress.hint"),
-    "chrome://zotero/skin/16/universal/book.svg",
   );
-  progressWin.show();
 
   const startTime = Date.now();
   const total = items.length;
 
   const updateProgress = () => {
-    progressWin.changeHeadline(
+    panel.update(
+      (result.checked / total) * 100,
       getString("preprint.progress.item", {
         current: result.checked,
         total,
@@ -1408,13 +1427,13 @@ async function processPreprints(
     );
   };
 
-  for (let batchStart = 0; batchStart < total; batchStart += BATCH_SIZE) {
+  for (let batchStart = 0; batchStart < total; batchStart += batchSize) {
     if (cancel.requested) {
       result.cancelled = true;
       break;
     }
 
-    const batch = items.slice(batchStart, batchStart + BATCH_SIZE);
+    const batch = items.slice(batchStart, batchStart + batchSize);
     const batchStartTime = Date.now();
 
     await Promise.all(
@@ -1466,7 +1485,7 @@ async function processPreprints(
       }),
     );
 
-    const isLastBatch = batchStart + BATCH_SIZE >= total;
+    const isLastBatch = batchStart + batchSize >= total;
     if (!isLastBatch && !cancel.requested) {
       const elapsed = Date.now() - batchStartTime;
       const pad = BATCH_MIN_INTERVAL_MS - elapsed;
@@ -1474,7 +1493,7 @@ async function processPreprints(
     }
   }
 
-  progressWin.close();
+  panel.close();
   return result;
 }
 
@@ -1528,11 +1547,7 @@ async function runFindPublishedVersions(
   if (activeCancel) return;
 
   if (preprints.length === 0) {
-    Services.prompt.alert(
-      null,
-      getString("preprint.title"),
-      getString(noneFoundKey),
-    );
+    showResultPanel(getString("preprint.title"), getString(noneFoundKey));
     return;
   }
 
@@ -1542,10 +1557,10 @@ async function runFindPublishedVersions(
 
   try {
     const result = await processPreprints(preprints, cancel);
-    Services.prompt.alert(
-      null,
+    showResultPanel(
       getString("preprint.title"),
       buildPreprintResultMessage(result),
+      result.hadApiErrors,
     );
   } finally {
     activeCancel = null;
@@ -1906,19 +1921,18 @@ async function processEnrichments(
     hadApiErrors: false,
   };
 
-  const progressWin = new Zotero.ProgressWindow({ closeOnClick: false });
-  progressWin.changeHeadline(getString("enrich.progress.title"));
-  progressWin.addLines(
+  const batchSize = resolveBatchSize();
+  const panel = createProgressPanel(
+    getString("enrich.progress.title"),
     getString("enrich.progress.hint"),
-    "chrome://zotero/skin/16/universal/book.svg",
   );
-  progressWin.show();
 
   const startTime = Date.now();
   const total = items.length;
 
   const updateProgress = () => {
-    progressWin.changeHeadline(
+    panel.update(
+      (result.processed / total) * 100,
       getString("enrich.progress.item", {
         current: result.processed,
         total,
@@ -1930,13 +1944,13 @@ async function processEnrichments(
     );
   };
 
-  for (let batchStart = 0; batchStart < total; batchStart += BATCH_SIZE) {
+  for (let batchStart = 0; batchStart < total; batchStart += batchSize) {
     if (cancel.requested) {
       result.cancelled = true;
       break;
     }
 
-    const batch = items.slice(batchStart, batchStart + BATCH_SIZE);
+    const batch = items.slice(batchStart, batchStart + batchSize);
     const batchStartTime = Date.now();
 
     await Promise.all(
@@ -1972,7 +1986,7 @@ async function processEnrichments(
       }),
     );
 
-    const isLastBatch = batchStart + BATCH_SIZE >= total;
+    const isLastBatch = batchStart + batchSize >= total;
     if (!isLastBatch && !cancel.requested) {
       const elapsed = Date.now() - batchStartTime;
       const pad = BATCH_MIN_INTERVAL_MS - elapsed;
@@ -1980,7 +1994,7 @@ async function processEnrichments(
     }
   }
 
-  progressWin.close();
+  panel.close();
   return result;
 }
 
@@ -2032,11 +2046,7 @@ async function runEnrichMetadata(
   if (activeCancel) return;
 
   if (candidates.length === 0) {
-    Services.prompt.alert(
-      null,
-      getString("enrich.title"),
-      getString(noneFoundKey),
-    );
+    showResultPanel(getString("enrich.title"), getString(noneFoundKey));
     return;
   }
 
@@ -2046,10 +2056,10 @@ async function runEnrichMetadata(
 
   try {
     const result = await processEnrichments(candidates, cancel);
-    Services.prompt.alert(
-      null,
+    showResultPanel(
       getString("enrich.title"),
       buildEnrichResultMessage(result),
+      result.hadApiErrors,
     );
   } finally {
     activeCancel = null;
@@ -2106,8 +2116,7 @@ async function findDOIs(): Promise<void> {
 
   const { toProcess } = analyzeItems(items);
   if (toProcess.length === 0) {
-    Services.prompt.alert(
-      null,
+    showResultPanel(
       getString("findDOI.title"),
       getString("findDOI.allHaveData"),
     );
@@ -2120,10 +2129,10 @@ async function findDOIs(): Promise<void> {
 
   try {
     const result = await processItems(toProcess, cancel);
-    Services.prompt.alert(
-      null,
+    showResultPanel(
       getString("findDOI.title"),
       buildResultMessage(result),
+      result.hadApiErrors,
     );
   } finally {
     activeCancel = null;
@@ -2138,8 +2147,7 @@ async function findDOIsForSelected(): Promise<void> {
   const { toProcess } = analyzeItems(ZP.getSelectedItems());
 
   if (toProcess.length === 0) {
-    Services.prompt.alert(
-      null,
+    showResultPanel(
       getString("findDOI.title"),
       getString("findDOI.allSelectedHaveData"),
     );
@@ -2152,10 +2160,10 @@ async function findDOIsForSelected(): Promise<void> {
 
   try {
     const result = await processItems(toProcess, cancel);
-    Services.prompt.alert(
-      null,
+    showResultPanel(
       getString("findDOI.title"),
       buildResultMessage(result),
+      result.hadApiErrors,
     );
   } finally {
     activeCancel = null;
