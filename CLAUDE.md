@@ -51,7 +51,7 @@ The plugin is TypeScript bundled via esbuild into an IIFE (Firefox 128 target). 
 
 **A failure tag is a claim about the paper, never about the network.** `findDOIForItem` and `findPublishedDOI` return `{result/ref, failed}`, where `failed` means at least one source threw. Callers write a tag only when `failed` is false; otherwise they set `hadApiErrors` and the result panel warns. This matters because `Zotero.HTTP.request` retries 429 and 5xx internally with a backoff that runs up to an hour by default, far past our own timeout, so a rate limit used to arrive as a plain `null` and get recorded as "this paper has no DOI". `httpGet` passes `errorDelayMax: 0` to surface the throttle immediately instead.
 
-Failures are counted through `runSource` (sequential cascades) and `trackSource` (raced lookups); source functions themselves no longer catch, so a new source needs no error handling of its own. Wrap `trackSource` *inside* `withNullAsReject`, never outside, or a source that legitimately found nothing is counted as a failure. Read `failures.count` only after every source has settled, which for `Promise.any` means only in the rejection path.
+Failures are counted through `runSource` (sequential cascades) and `trackSource` (raced lookups); source functions themselves no longer catch, so a new source needs no error handling of its own. Wrap `trackSource` _inside_ `withNullAsReject`, never outside, or a source that legitimately found nothing is counted as a failure. Read `failures.count` only after every source has settled, which for `Promise.any` means only in the rejection path.
 
 **404 does not always mean failure.** Semantic Scholar's `/paper/search/match` answers 404 with `{"error":"Title match not found"}` for a title it cannot match, and both Semantic Scholar and OpenAlex answer 404 for a DOI they do not hold. Those four call sites use `httpGetOptional`, which adds 404 to `successCodes` and returns `null`. Treating them as failures would suppress `TAG_NO_DOI` for every paper those sources do not know.
 
@@ -84,7 +84,7 @@ Failures are counted through `runSource` (sequential cascades) and `trackSource`
 **UI layer**:
 
 - `src/modules/menu.ts`: per-window menu registration; Tools menu has two items (DOI finding + preprint check); right-click menu has two items with separate visibility rules (`isRegularItem` vs `isPreprint`); DOM refs closed over at registration to avoid per-open getElementById lookups; single `popupshowing` listener per window cleaned up in `unregisterWindowMenus`
-- `src/utils/locale.ts`: hardcoded English strings with `replaceAll`-based parameter interpolation
+- `src/utils/locale.ts`: hardcoded English strings with `replaceAll`-based parameter interpolation. `common.*` holds the tails shared by all three flows, so a wording change lands in one place. House style for anything the user reads: no em-dashes, one idea per sentence, and no two independent clauses joined by a comma plus `and`, `but`, or `so`. Every result message states how many items were checked, so a count is never left implicit
 - Toolbar button and both shortcuts toggle: if processing → cancel, otherwise → start; `syncAllToolbarButtons()` updates label/tooltip across all open windows
 
 **Build pipeline**: `scripts/build.mjs` delegates to `scripts/zotero-cmd.mjs`, which cleans output, copies `addon/` template (substituting `__version__` etc.), runs esbuild, then zips to `.xpi`.

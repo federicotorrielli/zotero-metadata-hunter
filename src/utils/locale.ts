@@ -3,87 +3,92 @@ export function getString(
   params?: Record<string, string | number>,
 ): string {
   const strings: Record<string, string> = {
-    "toolbar.label": "Find DOIs & Abstracts",
+    // Shared tails. Both read the same in every flow, so they live once here
+    // and take the unit as a parameter.
+    "common.skipped":
+      "\n\n${count} ${unit} could not be checked because a source did not answer. This is usually a rate limit. Those items were left untagged. Run the same action again later to retry them.",
+    "common.apiWarning":
+      "\n\nSome requests failed. The counts above may be incomplete.",
+
+    "toolbar.label": "Find DOIs and Abstracts",
     "toolbar.tooltip": "Find missing DOIs and abstracts (Ctrl+Alt+D)",
-    "toolbar.cancel": "Cancel Operation",
-    "toolbar.cancel.tooltip": "Click to cancel the current operation",
+    "toolbar.cancel": "Stop",
+    "toolbar.cancel.tooltip": "Stop the run in progress",
     "menu.findDOI": "Find DOI and Abstract",
     "menu.findDOILibrary": "Find DOIs and Abstracts in Library",
-    "findDOI.title": "DOI and Abstract Finder",
-    "findDOI.allHaveData": "All items already have DOIs and abstracts.",
+
+    "findDOI.title": "Find DOIs and Abstracts",
+    "findDOI.allHaveData":
+      "Every item already has a DOI and an abstract. There is nothing to do.",
     "findDOI.allSelectedHaveData":
-      "All selected items already have DOIs and abstracts.",
-    "findDOI.noneFound": "No new DOIs or abstracts were found.",
+      "Every selected item already has a DOI and an abstract. There is nothing to do.",
+    "findDOI.noneFound":
+      "Checked ${total} item(s). No new DOIs or abstracts were found.",
     "findDOI.foundAbstractsOnly":
-      "Found ${abstracts} new abstract(s). No new DOIs were found.",
+      "Checked ${total} item(s). Added ${abstracts} abstract(s). No new DOIs were found.",
     "findDOI.foundDOIsOnly":
-      "Found ${dois} new DOI(s). No abstracts were found.",
+      "Checked ${total} item(s). Added ${dois} DOI(s). No new abstracts were found.",
     "findDOI.found":
-      "Found ${dois} new DOI(s) and ${abstracts} abstract(s) across ${total} items processed.",
+      "Checked ${total} item(s). Added ${dois} DOI(s) and ${abstracts} abstract(s).",
     "findDOI.cancelled":
-      "Cancelled after ${processed} item(s). Found ${dois} DOI(s) and ${abstracts} abstract(s).",
+      "Stopped after ${processed} item(s). Added ${dois} DOI(s) and ${abstracts} abstract(s).",
     "findDOI.taggedNoDOI":
-      '\n\n${count} item(s) tagged with "${tag}" — filter by this tag to review them.',
-    "findDOI.apiWarning":
-      "\n\nNote: some API requests failed — results may be incomplete.",
+      '\n\nNo source had a DOI for ${count} item(s). They now carry the tag "${tag}". Select that tag in the tag pane to review them.',
     "findDOI.progress.title": "Finding DOIs and Abstracts",
     "findDOI.progress.hint":
-      "Press Ctrl+Alt+D or click the toolbar button to cancel",
+      "Press Ctrl+Alt+D or click the toolbar button to stop",
     "findDOI.progress.item":
-      "Processing ${current}/${total} (${percent}%) • ${dois} DOIs + ${abstracts} abstracts found${eta}",
+      "Item ${current} of ${total} (${percent}%). Found ${dois} DOIs and ${abstracts} abstracts.${eta}",
 
     "preprint.menu.library": "Find Published Versions of Preprints",
     "preprint.menu.selected": "Check for Published Version",
-    "preprint.title": "Published Version Finder",
+    "preprint.title": "Find Published Versions",
     "preprint.noneFound": "No preprints were found.",
     "preprint.noneFoundSelected": "No preprints were found in the selection.",
     "preprint.noPublished":
-      "No published versions were found for ${total} preprint(s) checked.",
+      "Checked ${total} preprint(s). No published versions were found.",
     "preprint.found":
-      "Found published versions for ${found} of ${total} preprint(s). New items have been added and originals moved to trash.",
+      "Checked ${total} preprint(s). Found a published version for ${found} of them. The new items are in your library. The preprints they replace were moved to the trash.",
     "preprint.migratedChildren":
-      "\n\nMoved ${count} attachment(s)/note(s) from the preprint(s) onto the new published item(s).",
+      "\n\nMoved ${count} attachment(s) and note(s) onto the new items, so nothing of yours was left in the trash.",
     "preprint.convertedToPreprint":
-      '\n\nConverted ${count} generic "document" item(s) to the proper preprint type.',
+      '\n\nChanged ${count} generic "document" item(s) to the "preprint" item type.',
     "preprint.taggedNoPublished":
-      '\n\n${count} preprint(s) tagged with "${tag}" — filter by this tag to review them.',
+      '\n\nNo published version was found for ${count} preprint(s). They now carry the tag "${tag}".',
     "preprint.taggedFailed":
-      '\n\n${count} preprint(s) tagged with "${tag}" — a published version was found but the new item could not be created.',
+      '\n\nA published version was found for ${count} preprint(s), but the new item could not be created from it. They now carry the tag "${tag}".',
     "preprint.cancelled":
-      "Cancelled after checking ${checked} preprint(s). Found ${found} published version(s).",
-    "preprint.apiWarning":
-      "\n\nNote: some API requests failed — results may be incomplete.",
+      "Stopped after ${checked} preprint(s). Found ${found} published version(s).",
     "preprint.progress.title": "Checking Preprints for Published Versions",
     "preprint.progress.hint":
-      "Press Ctrl+Alt+P or click the toolbar button to cancel",
+      "Press Ctrl+Alt+P or click the toolbar button to stop",
     "preprint.progress.item":
-      "Checking ${current}/${total} (${percent}%) • ${found} published versions found${eta}",
+      "Preprint ${current} of ${total} (${percent}%). Found ${found} published versions.${eta}",
 
     "enrich.menu.library": "Enrich Metadata of Library",
     "enrich.menu.selected": "Enrich Metadata",
-    "enrich.title": "Metadata Enrichment",
+    "enrich.title": "Enrich Metadata",
     "enrich.noneEligible":
-      "No regular items needing enrichment were found. Preprints are skipped (use the preprint flow instead) and items already complete are not re-processed.",
+      "No items need enrichment. Items that already have full metadata are skipped. Preprints are skipped as well, because the published version finder handles those.",
     "enrich.noneEligibleSelected":
-      "None of the selected items can be enriched. Preprints are skipped and only regular items are eligible.",
+      "None of the selected items can be enriched. Only regular items are eligible. Preprints are skipped, because the published version finder handles those.",
     "enrich.noneEnriched":
-      "Checked ${total} item(s); no richer records were available beyond what was already stored.",
+      "Checked ${total} item(s). No source held a richer record than the one already stored.",
     "enrich.found":
-      "Enriched ${enriched} of ${total} item(s), filling ${fields} field(s) in total.",
+      "Checked ${total} item(s). Enriched ${enriched} of them, filling ${fields} field(s).",
     "enrich.cancelled":
-      "Cancelled after ${processed} item(s). Enriched ${enriched} item(s), filling ${fields} field(s).",
+      "Stopped after ${processed} item(s). Enriched ${enriched} of them, filling ${fields} field(s).",
     "enrich.taggedNoDOI":
-      '\n\n${count} item(s) tagged with "${tag}" because no DOI could be found, which is required for enrichment.',
+      '\n\nNo DOI could be found for ${count} item(s). Enrichment needs a DOI to look the record up. They now carry the tag "${tag}".',
     "enrich.taggedNoRicher":
-      '\n\n${count} item(s) tagged with "${tag}" because the lookup returned no improvements over what is already stored.',
+      '\n\nThe lookup returned nothing new for ${count} item(s). They now carry the tag "${tag}".',
     "enrich.taggedFailed":
-      '\n\n${count} item(s) tagged with "${tag}" because the metadata lookup or merge failed.',
-    "enrich.apiWarning":
-      "\n\nNote: some API requests failed, results may be incomplete.",
+      '\n\nThe lookup or the merge failed for ${count} item(s). They now carry the tag "${tag}".',
     "enrich.progress.title": "Enriching Metadata",
-    "enrich.progress.hint": "Press Ctrl+Alt+M to cancel",
+    "enrich.progress.hint":
+      "Press Ctrl+Alt+M or click the toolbar button to stop",
     "enrich.progress.item":
-      "Processing ${current}/${total} (${percent}%) • ${enriched} enriched, ${fields} fields filled${eta}",
+      "Item ${current} of ${total} (${percent}%). Enriched ${enriched}, filled ${fields} fields.${eta}",
   };
 
   let str = strings[key] ?? key;
