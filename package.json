@@ -1,6 +1,6 @@
 {
   "name": "zotero-metadata-hunter",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "packageManager": "pnpm@11.5.0",
   "description": "A Zotero plugin to find and add missing DOI numbers and abstracts to references",
   "config": {
@@ -14,9 +14,7 @@
   "license": "EUPL-1.2",
   "scripts": {
     "build": "tsc --noEmit && node scripts/build.mjs production",
-    "start": "node scripts/start.mjs",
-    "stop": "node scripts/stop.mjs",
-    "lint": "prettier --write . && eslint . --ext .ts --fix",
+    "lint": "prettier --write . && eslint . --fix",
     "test": "echo \"Error: no test specified\" && exit 1",
     "release": "release-it",
     "update-deps": "pnpm update --save"
@@ -37,7 +35,6 @@
     "@types/node": "^25.9.5",
     "@typescript-eslint/eslint-plugin": "^8.66.0",
     "@typescript-eslint/parser": "^8.66.0",
-    "chokidar": "^5.0.0",
     "compressing": "^2.1.1",
     "esbuild": "^0.28.1",
     "eslint": "10.4.0",

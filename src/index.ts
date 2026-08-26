@@ -278,6 +278,85 @@ function withNullAsReject<T>(p: Promise<T | null>): Promise<T> {
   });
 }
 
+// Every request the plugin makes goes through here.
+//
+// errorDelayMax: 0 switches off Zotero's own 429 and 5xx retry. That retry
+// backs off for up to an hour by default, far beyond the timeout below, so
+// leaving it on meant a throttled request was killed by our own timeout and
+// then reported as "nothing found". Seeing the failure at once is what lets
+// the caller tell a rate limit apart from a paper that genuinely has no DOI.
+async function httpGet(
+  url: string,
+  timeoutMs = 10_000,
+  successCodes?: number[],
+): Promise<any> {
+  return withTimeout(
+    Zotero.HTTP.request("GET", url, {
+      headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
+      errorDelayMax: 0,
+      ...(successCodes ? { successCodes } : {}),
+    }),
+    timeoutMs,
+  );
+}
+
+// For endpoints that answer 404 to mean "no such record" rather than "I could
+// not answer". Semantic Scholar replies 404 with {"error":"Title match not
+// found"} when a title does not match, and both Semantic Scholar and OpenAlex
+// reply 404 for a DOI they do not hold. Letting those count as failures would
+// suppress the "no DOI" tag for every paper the source simply does not know,
+// which is the opposite of the intent. Returns null for the 404 case.
+async function httpGetOptional(
+  url: string,
+  timeoutMs = 10_000,
+): Promise<any | null> {
+  const response = await httpGet(url, timeoutMs, [200, 404]);
+  return response.status === 404 ? null : response;
+}
+
+// Counts the sources that threw during one lookup. "Found nothing" and "the
+// request failed" both used to arrive as null, so a rate limit was recorded as
+// a fact about the paper and earned a permanent failure tag. Keeping a count
+// lets the caller tag only when every source actually answered.
+//
+// Read the count only once every source has settled. Promise.any resolves
+// while its losers are still in flight, so an early read is a moving target.
+interface SourceFailures {
+  count: number;
+}
+
+// Runs one source in a sequential cascade. A throw becomes a recorded failure
+// and a null, so the cascade carries on with the next source.
+async function runSource<T>(
+  failures: SourceFailures,
+  source: string,
+  fn: () => Promise<T | null>,
+): Promise<T | null> {
+  try {
+    return await fn();
+  } catch (e) {
+    failures.count++;
+    Zotero.debug(`Metadata Hunter: ${source} failed: ${e}`);
+    return null;
+  }
+}
+
+// Same bookkeeping for a raced lookup. The error is recorded and then rethrown,
+// so Promise.any goes on waiting for the other sources. Wrap this inside
+// withNullAsReject rather than outside it, otherwise a source that legitimately
+// found nothing is counted as a failure.
+function trackSource<T>(
+  failures: SourceFailures,
+  source: string,
+  p: Promise<T>,
+): Promise<T> {
+  return p.catch((e) => {
+    failures.count++;
+    Zotero.debug(`Metadata Hunter: ${source} failed: ${e}`);
+    throw e;
+  });
+}
+
 function formatEta(
   startTime: number,
   processed: number,
@@ -418,12 +497,7 @@ async function findDOIFromCrossRef(
   ): Promise<DOIResult | null> => {
     const params = [titleParam, ...extraParams].join("&");
     const url = `https://api.crossref.org/works?${params}&rows=10`;
-    const response: any = await withTimeout(
-      Zotero.HTTP.request("GET", url, {
-        headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
-      }),
-      10_000,
-    );
+    const response = await httpGet(url);
     const data = JSON.parse(response.responseText);
     for (const crossrefItem of data.message?.items ?? []) {
       if (crossrefItem.DOI && isTitleMatch(title, crossrefItem.title?.[0])) {
@@ -433,24 +507,20 @@ async function findDOIFromCrossRef(
     return null;
   };
 
-  try {
-    // First attempt: narrow query with author + year filter for precision.
-    const narrowParams: string[] = [];
-    if (lastName)
-      narrowParams.push(`query.author=${encodeURIComponent(lastName)}`);
-    if (year)
-      narrowParams.push(`filter=from-pub-date:${year},until-pub-date:${year}`);
+  // First attempt: narrow query with author + year filter for precision.
+  const narrowParams: string[] = [];
+  if (lastName)
+    narrowParams.push(`query.author=${encodeURIComponent(lastName)}`);
+  if (year)
+    narrowParams.push(`filter=from-pub-date:${year},until-pub-date:${year}`);
 
-    const narrow = await queryCrossRef(narrowParams);
-    if (narrow) return narrow;
+  const narrow = await queryCrossRef(narrowParams);
+  if (narrow) return narrow;
 
-    // Fallback: title-only query. Author substring matching in CrossRef can surface
-    // wrong results (e.g. "Kirchenbauer" matching "Müller-Kirchenbauer"), so if the
-    // narrowed query found nothing we retry without author/year constraints.
-    if (narrowParams.length > 0) return await queryCrossRef([]);
-  } catch (e) {
-    Zotero.debug(`Metadata Hunter: CrossRef request failed: ${e}`);
-  }
+  // Fallback: title-only query. Author substring matching in CrossRef can surface
+  // wrong results (e.g. "Kirchenbauer" matching "Müller-Kirchenbauer"), so if the
+  // narrowed query found nothing we retry without author/year constraints.
+  if (narrowParams.length > 0) return await queryCrossRef([]);
 
   return null;
 }
@@ -468,35 +538,26 @@ async function findDOIFromDBLP(
   const q = encodeURIComponent(queryWords + authorSuffix);
   const url = `https://dblp.org/search/publ/api?q=${q}&format=json&h=5&c=0`;
 
-  try {
-    const response: any = await withTimeout(
-      Zotero.HTTP.request("GET", url, {
-        headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
-      }),
-      10_000,
-    );
-    const data = JSON.parse(response.responseText);
-    const rawHits = data.result?.hits?.hit;
-    if (!rawHits) return null;
+  const response = await httpGet(url);
+  const data = JSON.parse(response.responseText);
+  const rawHits = data.result?.hits?.hit;
+  if (!rawHits) return null;
 
-    const hits: any[] = Array.isArray(rawHits) ? rawHits : [rawHits];
+  const hits: any[] = Array.isArray(rawHits) ? rawHits : [rawHits];
 
-    for (const hit of hits) {
-      const info = hit.info;
-      if (!info || !isTitleMatch(title, info.title)) continue;
+  for (const hit of hits) {
+    const info = hit.info;
+    if (!info || !isTitleMatch(title, info.title)) continue;
 
-      // Direct DOI field (most reliable)
-      if (info.doi) return { doi: info.doi as string, abstract: null };
+    // Direct DOI field (most reliable)
+    if (info.doi) return { doi: info.doi as string, abstract: null };
 
-      // Fallback: strip DOI out of the electronic edition URL
-      if (info.ee) {
-        const ee: string = Array.isArray(info.ee) ? info.ee[0] : info.ee;
-        const match = ee.match(/doi\.org\/(.+)$/);
-        if (match) return { doi: match[1], abstract: null };
-      }
+    // Fallback: strip DOI out of the electronic edition URL
+    if (info.ee) {
+      const ee: string = Array.isArray(info.ee) ? info.ee[0] : info.ee;
+      const match = ee.match(/doi\.org\/(.+)$/);
+      if (match) return { doi: match[1], abstract: null };
     }
-  } catch (e) {
-    Zotero.debug(`Metadata Hunter: DBLP request failed: ${e}`);
   }
 
   return null;
@@ -531,30 +592,21 @@ async function findDOIFromArXiv(
 
   const url = `https://export.arxiv.org/api/query?search_query=ti:${cleanTitle}${authorPart}&max_results=5&sortBy=relevance`;
 
-  try {
-    const response: any = await withTimeout(
-      Zotero.HTTP.request("GET", url, {
-        headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
-      }),
-      10_000,
-    );
-    const xmlDoc = new DOMParser().parseFromString(
-      response.responseText,
-      "text/xml",
-    );
+  const response = await httpGet(url);
+  const xmlDoc = new DOMParser().parseFromString(
+    response.responseText,
+    "text/xml",
+  );
 
-    for (const entry of xmlDoc.querySelectorAll("entry")) {
-      const entryTitle = entry
-        .querySelector("title")
-        ?.textContent?.trim()
-        .replace(/\s+/g, " ");
-      if (!entryTitle || !isTitleMatch(title, entryTitle)) continue;
+  for (const entry of xmlDoc.querySelectorAll("entry")) {
+    const entryTitle = entry
+      .querySelector("title")
+      ?.textContent?.trim()
+      .replace(/\s+/g, " ");
+    if (!entryTitle || !isTitleMatch(title, entryTitle)) continue;
 
-      const doi = extractDoiFromArxivEntry(entry);
-      if (doi) return { doi, abstract: null };
-    }
-  } catch (e) {
-    Zotero.debug(`Metadata Hunter: arXiv request failed: ${e}`);
+    const doi = extractDoiFromArxivEntry(entry);
+    if (doi) return { doi, abstract: null };
   }
 
   return null;
@@ -570,25 +622,16 @@ async function findDOIFromSemanticScholar(
 ): Promise<DOIResult | null> {
   const url = `https://api.semanticscholar.org/graph/v1/paper/search/match?query=${encodeURIComponent(cleanTitleForQuery(title))}&fields=externalIds,title,abstract`;
 
-  try {
-    const response: any = await withTimeout(
-      Zotero.HTTP.request("GET", url, {
-        headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
-      }),
-      10_000,
-    );
-    const data = JSON.parse(response.responseText);
-    const paper = data.data?.[0];
-    if (!paper || !isTitleMatch(title, paper.title)) return null;
+  const response = await httpGetOptional(url);
+  if (!response) return null;
+  const data = JSON.parse(response.responseText);
+  const paper = data.data?.[0];
+  if (!paper || !isTitleMatch(title, paper.title)) return null;
 
-    const doi = paper.externalIds?.DOI;
-    if (!doi) return null;
+  const doi = paper.externalIds?.DOI;
+  if (!doi) return null;
 
-    return { doi, abstract: paper.abstract ?? null };
-  } catch (e) {
-    Zotero.debug(`Metadata Hunter: Semantic Scholar title search failed: ${e}`);
-    return null;
-  }
+  return { doi, abstract: paper.abstract ?? null };
 }
 
 // Try sources in priority order: CrossRef → DBLP → Semantic Scholar → arXiv.
@@ -600,23 +643,39 @@ async function findDOIFromSemanticScholar(
 // enrichment would later resolve that DOI back to a preprint record and
 // silently demote the item. Preprint items keep the existing behavior so they
 // can be assigned their canonical arXiv DOI when missing.
-async function findDOIForItem(item: any): Promise<DOIResult | null> {
+interface DOILookup {
+  result: DOIResult | null;
+  // True when at least one source threw. The absence of a DOI is then
+  // unproven, so the caller must not write a failure tag for it.
+  failed: boolean;
+}
+
+async function findDOIForItem(item: any): Promise<DOILookup> {
   const doi = item.getField("DOI")?.trim();
-  if (!item.isRegularItem() || (doi && doi !== "-")) return null;
+  if (!item.isRegularItem() || (doi && doi !== "-"))
+    return { result: null, failed: false };
 
   const title = item.getField("title");
-  if (!title) return null;
+  if (!title) return { result: null, failed: false };
 
   const requirePublished = !isPreprint(item);
   const accept = (r: DOIResult | null): DOIResult | null =>
     r && (!requirePublished || isPublishedDOI(r.doi)) ? r : null;
 
-  return (
-    accept(await findDOIFromCrossRef(item, title)) ??
-    accept(await findDOIFromDBLP(item, title)) ??
-    accept(await findDOIFromSemanticScholar(item, title)) ??
-    accept(await findDOIFromArXiv(item, title))
-  );
+  const failures: SourceFailures = { count: 0 };
+  const sources: [string, () => Promise<DOIResult | null>][] = [
+    ["CrossRef", () => findDOIFromCrossRef(item, title)],
+    ["DBLP", () => findDOIFromDBLP(item, title)],
+    ["Semantic Scholar", () => findDOIFromSemanticScholar(item, title)],
+    ["arXiv", () => findDOIFromArXiv(item, title)],
+  ];
+
+  for (const [name, fn] of sources) {
+    const found = accept(await runSource(failures, name, fn));
+    if (found) return { result: found, failed: false };
+  }
+
+  return { result: null, failed: failures.count > 0 };
 }
 
 // ── Abstract finding ───────────────────────────────────────────────────────────
@@ -624,58 +683,39 @@ async function findDOIForItem(item: any): Promise<DOIResult | null> {
 async function findAbstractFromSemanticScholar(
   doi: string,
 ): Promise<string | null> {
-  try {
-    const response = await Zotero.HTTP.request(
-      "GET",
-      `https://api.semanticscholar.org/graph/v1/paper/DOI:${doi}?fields=abstract`,
-      { headers: { "User-Agent": `Zotero Metadata Hunter/${version}` } },
-    );
-    return JSON.parse(response.responseText).abstract ?? null;
-  } catch (e) {
-    Zotero.debug(`Metadata Hunter: Semantic Scholar failed: ${e}`);
-    return null;
-  }
+  const response = await httpGetOptional(
+    `https://api.semanticscholar.org/graph/v1/paper/DOI:${doi}?fields=abstract`,
+  );
+  if (!response) return null;
+  return JSON.parse(response.responseText).abstract ?? null;
 }
 
 async function findAbstractFromPubMed(doi: string): Promise<string | null> {
-  try {
-    const searchResponse = await Zotero.HTTP.request(
-      "GET",
-      `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(doi)}&retmode=json`,
-    );
-    const ids = JSON.parse(searchResponse.responseText).esearchresult?.idlist;
-    if (!ids?.length) return null;
+  const searchResponse = await httpGet(
+    `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(doi)}&retmode=json`,
+  );
+  const ids = JSON.parse(searchResponse.responseText).esearchresult?.idlist;
+  if (!ids?.length) return null;
 
-    const fetchResponse = await Zotero.HTTP.request(
-      "GET",
-      `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=${ids[0]}&retmode=xml`,
-    );
-    const xmlDoc = new DOMParser().parseFromString(
-      fetchResponse.responseText,
-      "text/xml",
-    );
-    return xmlDoc.querySelector("AbstractText")?.textContent ?? null;
-  } catch (e) {
-    Zotero.debug(`Metadata Hunter: PubMed failed: ${e}`);
-    return null;
-  }
+  const fetchResponse = await httpGet(
+    `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=${ids[0]}&retmode=xml`,
+  );
+  const xmlDoc = new DOMParser().parseFromString(
+    fetchResponse.responseText,
+    "text/xml",
+  );
+  return xmlDoc.querySelector("AbstractText")?.textContent ?? null;
 }
 
 async function findAbstractFromOpenAlex(doi: string): Promise<string | null> {
-  try {
-    const response = await Zotero.HTTP.request(
-      "GET",
-      `https://api.openalex.org/works/doi:${doi}`,
-      { headers: { "User-Agent": `Zotero Metadata Hunter/${version}` } },
-    );
-    const data = JSON.parse(response.responseText);
-    if (data.abstract_inverted_index) {
-      return reconstructAbstract(data.abstract_inverted_index);
-    }
-  } catch (e) {
-    Zotero.debug(`Metadata Hunter: OpenAlex failed: ${e}`);
-  }
-  return null;
+  const response = await httpGetOptional(
+    `https://api.openalex.org/works/doi:${doi}`,
+  );
+  if (!response) return null;
+  const data = JSON.parse(response.responseText);
+  return data.abstract_inverted_index
+    ? reconstructAbstract(data.abstract_inverted_index)
+    : null;
 }
 
 function reconstructAbstract(invertedIndex: Record<string, number[]>): string {
@@ -696,16 +736,19 @@ async function findAbstractForItem(
 ): Promise<string | null> {
   if (item.getField("abstractNote")?.trim()) return null;
 
+  const failures: SourceFailures = { count: 0 };
+  const race = (name: string, p: Promise<string | null>) =>
+    withNullAsReject(trackSource(failures, name, withTimeout(p, 8_000)));
+
   try {
     return await Promise.any([
-      withNullAsReject(
-        withTimeout(findAbstractFromSemanticScholar(doi), 8_000),
-      ),
-      withNullAsReject(withTimeout(findAbstractFromPubMed(doi), 8_000)),
-      withNullAsReject(withTimeout(findAbstractFromOpenAlex(doi), 8_000)),
+      race("Semantic Scholar", findAbstractFromSemanticScholar(doi)),
+      race("PubMed", findAbstractFromPubMed(doi)),
+      race("OpenAlex", findAbstractFromOpenAlex(doi)),
     ]);
   } catch {
-    // AggregateError: every source returned null or timed out
+    // AggregateError: every source found nothing or failed. A missing abstract
+    // writes no tag, so the two cases lead to the same outcome here.
     return null;
   }
 }
@@ -825,15 +868,21 @@ async function processItems(
           let bundledAbstract: string | null = null;
 
           if (!hadDOI) {
-            const found = await findDOIForItem(item);
-            if (found) {
-              doi = found.doi;
-              bundledAbstract = found.abstract; // may be non-null when SS won the race
+            const lookup = await findDOIForItem(item);
+            if (lookup.result) {
+              doi = lookup.result.doi;
+              // May be non-null when Semantic Scholar won the race
+              bundledAbstract = lookup.result.abstract;
               item.setField("DOI", doi);
               await item.saveTx();
               result.foundDOIs++;
               // Clear any prior "no DOI" mark from a previous run
               await clearFailureTags(item, [TAG_NO_DOI]);
+            } else if (lookup.failed) {
+              // A source threw, most often a rate limit. The item may well have
+              // a DOI, so warn instead of writing a tag the user would have to
+              // clear by hand.
+              result.hadApiErrors = true;
             } else {
               await setFailureTag(item, TAG_NO_DOI);
               result.taggedNoDOI++;
@@ -1017,25 +1066,16 @@ async function findPublishedDOIFromArxivById(
   arxivId: string,
 ): Promise<string | null> {
   const url = `https://export.arxiv.org/api/query?id_list=${arxivId}&max_results=1`;
-  try {
-    const response: any = await withTimeout(
-      Zotero.HTTP.request("GET", url, {
-        headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
-      }),
-      10_000,
-    );
-    const xmlDoc = new DOMParser().parseFromString(
-      response.responseText,
-      "text/xml",
-    );
-    const entry = xmlDoc.querySelector("entry");
-    if (!entry) return null;
+  const response = await httpGet(url);
+  const xmlDoc = new DOMParser().parseFromString(
+    response.responseText,
+    "text/xml",
+  );
+  const entry = xmlDoc.querySelector("entry");
+  if (!entry) return null;
 
-    const doi = extractDoiFromArxivEntry(entry);
-    if (doi && isPublishedDOI(doi)) return doi;
-  } catch (e) {
-    Zotero.debug(`Metadata Hunter: arXiv ID lookup failed: ${e}`);
-  }
+  const doi = extractDoiFromArxivEntry(entry);
+  if (doi && isPublishedDOI(doi)) return doi;
   return null;
 }
 
@@ -1043,34 +1083,23 @@ async function findPublishedDOIFromSemanticScholar(
   title: string,
 ): Promise<string | null> {
   const url = `https://api.semanticscholar.org/graph/v1/paper/search/match?query=${encodeURIComponent(cleanTitleForQuery(title))}&fields=externalIds,title,venue,publicationVenue`;
-  try {
-    const response: any = await withTimeout(
-      Zotero.HTTP.request("GET", url, {
-        headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
-      }),
-      10_000,
-    );
-    const data = JSON.parse(response.responseText);
-    const paper = data.data?.[0];
-    if (!paper || !isTitleMatch(title, paper.title)) return null;
+  const response = await httpGetOptional(url);
+  if (!response) return null;
+  const data = JSON.parse(response.responseText);
+  const paper = data.data?.[0];
+  if (!paper || !isTitleMatch(title, paper.title)) return null;
 
-    const doi = paper.externalIds?.DOI;
-    if (!doi || !isPublishedDOI(doi)) return null;
+  const doi = paper.externalIds?.DOI;
+  if (!doi || !isPublishedDOI(doi)) return null;
 
-    const venue =
-      paper.publicationVenue?.name ??
-      paper.publicationVenue?.alternate_names?.[0] ??
-      paper.venue ??
-      "";
-    if (!isPublishedVenue(venue)) return null;
+  const venue =
+    paper.publicationVenue?.name ??
+    paper.publicationVenue?.alternate_names?.[0] ??
+    paper.venue ??
+    "";
+  if (!isPublishedVenue(venue)) return null;
 
-    return doi;
-  } catch (e) {
-    Zotero.debug(
-      `Metadata Hunter: Semantic Scholar preprint lookup failed: ${e}`,
-    );
-    return null;
-  }
+  return doi;
 }
 
 async function findPublishedDOIFromCrossRef(
@@ -1083,21 +1112,12 @@ async function findPublishedDOIFromCrossRef(
   if (lastName) params.push(`query.author=${encodeURIComponent(lastName)}`);
 
   const url = `https://api.crossref.org/works?${params.join("&")}&rows=10`;
-  try {
-    const response: any = await withTimeout(
-      Zotero.HTTP.request("GET", url, {
-        headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
-      }),
-      10_000,
-    );
-    const data = JSON.parse(response.responseText);
-    for (const crItem of data.message?.items ?? []) {
-      if (!crItem.DOI || !isPublishedDOI(crItem.DOI)) continue;
-      if (!isTitleMatch(title, crItem.title?.[0])) continue;
-      if (PUBLISHED_CROSSREF_TYPES.has(crItem.type ?? "")) return crItem.DOI;
-    }
-  } catch (e) {
-    Zotero.debug(`Metadata Hunter: CrossRef preprint lookup failed: ${e}`);
+  const response = await httpGet(url);
+  const data = JSON.parse(response.responseText);
+  for (const crItem of data.message?.items ?? []) {
+    if (!crItem.DOI || !isPublishedDOI(crItem.DOI)) continue;
+    if (!isTitleMatch(title, crItem.title?.[0])) continue;
+    if (PUBLISHED_CROSSREF_TYPES.has(crItem.type ?? "")) return crItem.DOI;
   }
   return null;
 }
@@ -1113,47 +1133,38 @@ async function findPublishedRefFromDBLP(
   const q = encodeURIComponent(queryWords + authorSuffix);
   const url = `https://dblp.org/search/publ/api?q=${q}&format=json&h=5&c=0`;
 
-  try {
-    const response: any = await withTimeout(
-      Zotero.HTTP.request("GET", url, {
-        headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
-      }),
-      10_000,
-    );
-    const data = JSON.parse(response.responseText);
-    const rawHits = data.result?.hits?.hit;
-    if (!rawHits) return null;
+  const response = await httpGet(url);
+  const data = JSON.parse(response.responseText);
+  const rawHits = data.result?.hits?.hit;
+  if (!rawHits) return null;
 
-    const hits: any[] = Array.isArray(rawHits) ? rawHits : [rawHits];
+  const hits: any[] = Array.isArray(rawHits) ? rawHits : [rawHits];
 
-    for (const hit of hits) {
-      const info = hit.info;
-      if (!info || !isTitleMatch(title, info.title)) continue;
-      if (!isPublishedVenue(info.venue ?? "")) continue;
+  for (const hit of hits) {
+    const info = hit.info;
+    if (!info || !isTitleMatch(title, info.title)) continue;
+    if (!isPublishedVenue(info.venue ?? "")) continue;
 
-      if (info.doi && isPublishedDOI(info.doi))
-        return { doi: info.doi as string };
+    if (info.doi && isPublishedDOI(info.doi))
+      return { doi: info.doi as string };
 
-      // Normalise ee to array and scan all entries
-      const ees: string[] = info.ee
-        ? Array.isArray(info.ee)
-          ? info.ee
-          : [info.ee]
-        : [];
+    // Normalise ee to array and scan all entries
+    const ees: string[] = info.ee
+      ? Array.isArray(info.ee)
+        ? info.ee
+        : [info.ee]
+      : [];
 
-      // Prefer a DOI embedded in an ee URL
-      for (const ee of ees) {
-        const match = ee.match(/doi\.org\/(.+)$/);
-        if (match && isPublishedDOI(match[1])) return { doi: match[1] };
-      }
-
-      // Fall back to the first non-arXiv venue URL (e.g. OpenReview, PMLR)
-      for (const ee of ees) {
-        if (!ee.includes("arxiv.org")) return { url: ee };
-      }
+    // Prefer a DOI embedded in an ee URL
+    for (const ee of ees) {
+      const match = ee.match(/doi\.org\/(.+)$/);
+      if (match && isPublishedDOI(match[1])) return { doi: match[1] };
     }
-  } catch (e) {
-    Zotero.debug(`Metadata Hunter: DBLP preprint lookup failed: ${e}`);
+
+    // Fall back to the first non-arXiv venue URL (e.g. OpenReview, PMLR)
+    for (const ee of ees) {
+      if (!ee.includes("arxiv.org")) return { url: ee };
+    }
   }
   return null;
 }
@@ -1252,88 +1263,87 @@ async function findPublishedRefFromOpenReview(
   // and we filter them out; the real submission may sit further down the list.
   const url = `https://api2.openreview.net/notes/search?term=${query}&content=title&type=exact&source=forum&limit=25`;
 
-  try {
-    const response: any = await withTimeout(
-      Zotero.HTTP.request("GET", url, {
-        headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
-      }),
-      10_000,
-    );
-    const data = JSON.parse(response.responseText);
+  const response = await httpGet(url);
+  const data = JSON.parse(response.responseText);
 
-    for (const note of data.notes ?? []) {
-      const noteTitle = openReviewContentValue(note, "title");
-      if (!isTitleMatch(title, noteTitle)) continue;
+  for (const note of data.notes ?? []) {
+    const noteTitle = openReviewContentValue(note, "title");
+    if (!isTitleMatch(title, noteTitle)) continue;
 
-      if (isDblpMirrorNote(note)) continue;
+    if (isDblpMirrorNote(note)) continue;
 
-      const venue = openReviewContentValue(note, "venue");
-      const venueId = openReviewContentValue(note, "venueid");
-      if (!isPublishedOpenReviewVenue(venue, venueId)) continue;
+    const venue = openReviewContentValue(note, "venue");
+    const venueId = openReviewContentValue(note, "venueid");
+    if (!isPublishedOpenReviewVenue(venue, venueId)) continue;
 
-      // Anonymized or thin notes carry a title but no authors; the web
-      // translator would produce a creatorless item, so reject them here.
-      if (!openReviewNoteHasAuthors(note)) continue;
+    // Anonymized or thin notes carry a title but no authors; the web
+    // translator would produce a creatorless item, so reject them here.
+    if (!openReviewNoteHasAuthors(note)) continue;
 
-      const forum = note.forum || note.id;
-      if (!forum) continue;
+    const forum = note.forum || note.id;
+    if (!forum) continue;
 
-      const url = `https://openreview.net/forum?id=${encodeURIComponent(forum)}`;
-      // Prefer the note's own BibTeX. openreview.net/forum answers non-browser
-      // clients with a 307 to /challenge, so Zotero's web translator runs on
-      // the anti-bot page and reports "No suitable translators found". The
-      // search response already in hand carries a complete record, so the
-      // forum page never has to be fetched. Notes without BibTeX fall back to
-      // the URL, which is the old behaviour.
-      const bibtex = openReviewContentValue(note, "_bibtex");
-      return bibtex ? { bibtex, url } : { url };
-    }
-  } catch (e) {
-    Zotero.debug(`Metadata Hunter: OpenReview preprint lookup failed: ${e}`);
+    const url = `https://openreview.net/forum?id=${encodeURIComponent(forum)}`;
+    // Prefer the note's own BibTeX. openreview.net/forum answers non-browser
+    // clients with a 307 to /challenge, so Zotero's web translator runs on
+    // the anti-bot page and reports "No suitable translators found". The
+    // search response already in hand carries a complete record, so the
+    // forum page never has to be fetched. Notes without BibTeX fall back to
+    // the URL, which is the old behaviour.
+    const bibtex = openReviewContentValue(note, "_bibtex");
+    return bibtex ? { bibtex, url } : { url };
   }
 
   return null;
 }
 
-async function findPublishedDOI(item: any): Promise<PublishedRef | null> {
+interface PublishedLookup {
+  ref: PublishedRef | null;
+  // Same meaning as DOILookup.failed: a source threw, so "no published
+  // version" is unproven and must not be tagged.
+  failed: boolean;
+}
+
+async function findPublishedDOI(item: any): Promise<PublishedLookup> {
   const title = item.getField("title");
-  if (!title) return null;
+  if (!title) return { ref: null, failed: false };
+
+  const failures: SourceFailures = { count: 0 };
 
   const arxivId = extractArxivId(item);
   if (arxivId) {
-    const doi = await findPublishedDOIFromArxivById(arxivId);
-    if (doi) return { doi };
+    const doi = await runSource(failures, "arXiv ID lookup", () =>
+      findPublishedDOIFromArxivById(arxivId),
+    );
+    if (doi) return { ref: { doi }, failed: false };
   }
 
   // Race fallback sources — first non-null result wins,
   // same pattern as findAbstractForItem.
+  const race = (name: string, p: Promise<PublishedRef | null>) =>
+    withNullAsReject(trackSource(failures, name, withTimeout(p, 10_000)));
+
   try {
-    return await Promise.any([
-      withNullAsReject(
-        withTimeout(
-          findPublishedDOIFromSemanticScholar(title).then(
-            (doi): PublishedRef | null => (doi ? { doi } : null),
-          ),
-          10_000,
+    const ref = await Promise.any([
+      race(
+        "Semantic Scholar",
+        findPublishedDOIFromSemanticScholar(title).then(
+          (doi): PublishedRef | null => (doi ? { doi } : null),
         ),
       ),
-      withNullAsReject(
-        withTimeout(
-          findPublishedDOIFromCrossRef(item, title).then(
-            (doi): PublishedRef | null => (doi ? { doi } : null),
-          ),
-          10_000,
+      race(
+        "CrossRef",
+        findPublishedDOIFromCrossRef(item, title).then(
+          (doi): PublishedRef | null => (doi ? { doi } : null),
         ),
       ),
-      withNullAsReject(
-        withTimeout(findPublishedRefFromDBLP(item, title), 10_000),
-      ),
-      withNullAsReject(
-        withTimeout(findPublishedRefFromOpenReview(title), 10_000),
-      ),
+      race("DBLP", findPublishedRefFromDBLP(item, title)),
+      race("OpenReview", findPublishedRefFromOpenReview(title)),
     ]);
+    return { ref, failed: false };
   } catch {
-    return null;
+    // Every source settled by now, so the count is final.
+    return { ref: null, failed: failures.count > 0 };
   }
 }
 
@@ -1556,7 +1566,8 @@ async function processPreprints(
       batch.map(async (item) => {
         if (cancel.requested) return;
         try {
-          const ref = await findPublishedDOI(item);
+          const lookup = await findPublishedDOI(item);
+          const ref = lookup.ref;
           const newItem = ref ? await createItemFromPublished(ref, item) : null;
 
           if (newItem) {
@@ -1578,6 +1589,10 @@ async function processPreprints(
             if (ref) {
               await setFailureTag(item, TAG_UPDATE_FAILED);
               result.taggedFailed++;
+            } else if (lookup.failed) {
+              // A source threw, so the absence of a published version is
+              // unproven. Warn rather than tag.
+              result.hadApiErrors = true;
             } else {
               await setFailureTag(item, TAG_NO_PUBLISHED);
               result.taggedNoPublished++;
@@ -1928,6 +1943,8 @@ interface EnrichOutcome {
   skipped?: boolean;
   noDOI?: boolean;
   failed?: boolean;
+  // A source threw. Nothing is tagged; the run reports an API warning instead.
+  apiError?: boolean;
   changed?: string[];
 }
 
@@ -1936,20 +1953,21 @@ async function enrichItemMetadata(item: any): Promise<EnrichOutcome> {
 
   let doi = item.getField("DOI")?.trim();
   if (!doi || doi === "-") {
-    const found = await findDOIForItem(item);
-    if (!found) {
+    const lookup = await findDOIForItem(item);
+    if (!lookup.result) {
+      if (lookup.failed) return { apiError: true };
       await setFailureTag(item, TAG_NO_DOI);
       return { noDOI: true };
     }
-    item.setField("DOI", found.doi);
+    item.setField("DOI", lookup.result.doi);
     // Keep the abstract that came bundled with the DOI lookup if Semantic
     // Scholar won and the item has no abstract yet — saves one round trip.
-    if (found.abstract && !item.getField("abstractNote")?.trim()) {
-      item.setField("abstractNote", found.abstract);
+    if (lookup.result.abstract && !item.getField("abstractNote")?.trim()) {
+      item.setField("abstractNote", lookup.result.abstract);
     }
     await item.saveTx();
     await clearFailureTags(item, [TAG_NO_DOI]);
-    doi = found.doi;
+    doi = lookup.result.doi;
   }
 
   if (!doi) return { failed: true };
@@ -1963,10 +1981,13 @@ async function enrichItemMetadata(item: any): Promise<EnrichOutcome> {
   // regress; the user can run the preprint flow or fix the DOI manually.
   if (!isPublishedDOI(doi)) {
     const upgraded = await findPublishedDOI(item);
-    if (upgraded && "doi" in upgraded && isPublishedDOI(upgraded.doi)) {
-      item.setField("DOI", upgraded.doi);
+    const ref = upgraded.ref;
+    if (ref && "doi" in ref && isPublishedDOI(ref.doi)) {
+      item.setField("DOI", ref.doi);
       await item.saveTx();
-      doi = upgraded.doi;
+      doi = ref.doi;
+    } else if (upgraded.failed) {
+      return { apiError: true };
     } else {
       await setFailureTag(item, TAG_NO_RICHER_RECORD);
       return { changed: [] };
@@ -2061,7 +2082,9 @@ async function processEnrichments(
         if (cancel.requested) return;
         try {
           const outcome = await enrichItemMetadata(item);
-          if (outcome.noDOI) {
+          if (outcome.apiError) {
+            result.hadApiErrors = true;
+          } else if (outcome.noDOI) {
             result.taggedNoDOI++;
           } else if (outcome.failed) {
             result.taggedFailed++;

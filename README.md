@@ -41,6 +41,8 @@ For items that already exist but are missing fields, the plugin looks up the can
 
 Items that cannot be resolved are tagged so you can filter them in the tag pane. Tags are removed on a later successful run.
 
+A tag is only written when every source actually answered. If a lookup fails because a source is unreachable or is rate limiting the request, the run reports an API warning and leaves the item untagged, so a temporary network problem does not leave a permanent mark that you have to clear by hand.
+
 | Tag                                    | Meaning                                                       |
 | -------------------------------------- | ------------------------------------------------------------- |
 | `MetadataHunter: No DOI`               | No DOI found in any source                                    |
@@ -55,9 +57,10 @@ Requires Node.js 20+, pnpm, and Zotero 7, 8, 9, or 10.
 ```bash
 pnpm install
 pnpm run build    # type-check, bundle, package the .xpi
-pnpm run start    # watch mode with live reload into Zotero
 pnpm run lint     # prettier and eslint
 ```
+
+There is no watch mode. To run the plugin from source, put a file named `metadatahunter@federicotorrielli.github.io` in the `extensions` directory of your [Zotero profile](https://www.zotero.org/support/kb/profile_directory), containing the absolute path to `build/addon`. Rebuild and restart Zotero to pick up changes.
 
 ## Release
 
