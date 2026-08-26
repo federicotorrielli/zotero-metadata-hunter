@@ -4,7 +4,7 @@ A Zotero plugin that finds missing DOIs and abstracts, replaces preprints with t
 
 [![Latest release](https://img.shields.io/github/v/release/federicotorrielli/zotero-metadata-hunter?style=flat-square)](https://github.com/federicotorrielli/zotero-metadata-hunter/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/federicotorrielli/zotero-metadata-hunter/total?style=flat-square)](https://github.com/federicotorrielli/zotero-metadata-hunter/releases)
-[![Zotero 7 and 8](https://img.shields.io/badge/Zotero-7%20%7C%208-CC2936?style=flat-square)](https://www.zotero.org/)
+[![Zotero 7 to 10](https://img.shields.io/badge/Zotero-7%20to%2010-CC2936?style=flat-square)](https://www.zotero.org/)
 [![License EUPL 1.2](https://img.shields.io/badge/License-EUPL%201.2-blue.svg?style=flat-square)](LICENSE)
 
 ## Install
@@ -27,7 +27,9 @@ DOI lookup tries CrossRef, then DBLP, then Semantic Scholar, then arXiv. Abstrac
 
 Shortcut: `Ctrl/Cmd + Alt + P`.
 
-Detects preprints by item type, arXiv URL, arXiv DOI, or an `arXiv:` line in the Extra field. If a published version is found, the plugin creates a new item from the DOI (the same way *Add Item by Identifier* does), moves attachments, notes, and annotations from the preprint onto the new item, and trashes the old one. Annotated PDFs stay attached to the upgraded record.
+Detects preprints by item type, arXiv URL, arXiv DOI, or an `arXiv:` line in the Extra field. If a published version is found, the plugin creates a new item from the DOI (the same way _Add Item by Identifier_ does), moves attachments, notes, and annotations from the preprint onto the new item, and trashes the old one. Annotated PDFs stay attached to the upgraded record.
+
+Venues that publish through OpenReview, such as ICLR and ICML, issue no DOI. For those the plugin imports the BibTeX record that the OpenReview API returns alongside the search result, so it never has to load `openreview.net/forum`. That page answers non-browser clients with a redirect to an anti-bot challenge, which is why the older URL-based path failed.
 
 ### Enrich sparse items
 
@@ -39,16 +41,16 @@ For items that already exist but are missing fields, the plugin looks up the can
 
 Items that cannot be resolved are tagged so you can filter them in the tag pane. Tags are removed on a later successful run.
 
-| Tag | Meaning |
-| --- | --- |
-| `MetadataHunter: No DOI` | No DOI found in any source |
-| `MetadataHunter: No Published Version` | Preprint checked, no non-preprint publication found |
-| `MetadataHunter: Update Failed` | Published version found but the new item could not be created |
-| `MetadataHunter: No Richer Record` | Enrichment ran but nothing new was added |
+| Tag                                    | Meaning                                                       |
+| -------------------------------------- | ------------------------------------------------------------- |
+| `MetadataHunter: No DOI`               | No DOI found in any source                                    |
+| `MetadataHunter: No Published Version` | Preprint checked, no non-preprint publication found           |
+| `MetadataHunter: Update Failed`        | Published version found but the new item could not be created |
+| `MetadataHunter: No Richer Record`     | Enrichment ran but nothing new was added                      |
 
 ## Development
 
-Requires Node.js 20+, pnpm, and Zotero 7 or 8.
+Requires Node.js 20+, pnpm, and Zotero 7, 8, 9, or 10.
 
 ```bash
 pnpm install
