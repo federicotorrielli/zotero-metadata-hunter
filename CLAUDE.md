@@ -43,9 +43,11 @@ The plugin is TypeScript bundled via esbuild into an IIFE (Firefox 128 target). 
 - `findDOIForItem()` tries four sources in order: **CrossRef → DBLP → Semantic Scholar → arXiv**
 - `findAbstractForItem()` races all three abstract sources simultaneously with `Promise.any`: **Semantic Scholar → PubMed → OpenAlex**
 - `processItems()` runs items in parallel batches of 5 with a `CancelToken`; a 300ms minimum inter-batch delay rate-limits API calls
-- `findPublishedDOI()` checks for a published version of a preprint: arXiv direct ID first, then Semantic Scholar + CrossRef + DBLP + OpenReview raced with `Promise.any`
+- `findPublishedDOI()` checks for a published version of a preprint: arXiv direct ID first, then Semantic Scholar + CrossRef + DBLP + OpenReview raced with `Promise.any`. It returns a `PublishedRef`, which is one of `{doi}`, `{url}`, or `{bibtex, url}`; `createItemFromPublished()` dispatches to `createItemFromDOI`, `createItemFromURL`, or `createItemFromBibtex` accordingly
+- **OpenReview must not be fetched as a web page.** `openreview.net/forum?id=...` answers non-browser clients with a 307 to `/challenge`, so `Zotero.HTTP.processDocuments` hands the translator an anti-bot page and item creation fails. `api2.openreview.net/notes/search` is not gated and its response already contains `content._bibtex.value`, a complete record. `findPublishedRefFromOpenReview` therefore returns `{bibtex, url}` and `createItemFromBibtex` imports it with Zotero's bundled BibTeX translator (`9cb70025-a888-4a29-a210-93ec52da40d4`), which derives the item type from the entry type. Do not rebuild those fields by hand: `api2` wraps every `content` field as `{value: ...}`, and the `openReviewContentValue`/`openReviewContentList` helpers exist to unwrap them
 - `processPreprints()` same batch/cancel/progress pattern as `processItems()`; on success creates a new item via `Zotero.Translate.Search`, **re-parents child attachments and notes from the source preprint onto the new item before trashing the source** (Zotero trashes children with their parent, so skipping this step silently loses annotated PDFs once Trash is emptied). When no published version replaces the source (no match, or item creation failed) and the source is Zotero's generic `document` type, `promoteDocumentToPreprint()` converts it in place to the proper `preprint` type. Bare imports (Scholar BibTeX, RIS, manual entry) often land arXiv preprints as `document`; the type-change remaps base fields so no metadata is lost. Non-preprint `document` items are re-typed instead by the enrichment flow, which sets item type from the translator's choice.
 - All HTTP calls use `Zotero.HTTP.request()` (async, respects Zotero proxy settings)
+- `resolveTargetItems()` is the single entry point for "what should this run act on": explicit item selection, else the selected collections, else the selected libraries, de-duplicated by id. All three library-wide actions go through it
 
 **Failure tags** (`TAG_NO_DOI`, `TAG_NO_PUBLISHED`, `TAG_UPDATE_FAILED`, `TAG_NO_RICHER_RECORD` at the top of `src/index.ts`): items that can't be resolved get a persistent Zotero tag so users can filter/retry. Tags are cleared automatically on a subsequent successful run — any code path that resolves an item must call the tag-removal helper, or stale failure tags will accumulate.
 
@@ -82,6 +84,13 @@ The plugin is TypeScript bundled via esbuild into an IIFE (Firefox 128 target). 
 - Toolbar button and both shortcuts toggle: if processing → cancel, otherwise → start; `syncAllToolbarButtons()` updates label/tooltip across all open windows
 
 **Build pipeline**: `scripts/build.mjs` delegates to `scripts/zotero-cmd.mjs`, which cleans output, copies `addon/` template (substituting `__version__` etc.), runs esbuild, then zips to `.xpi`.
+
+## Zotero version compatibility
+
+Supports Zotero 7 through 10 (`strict_min_version` 6.999, `strict_max_version` 10.0.*). Two version-specific traps:
+
+- **Selection getters.** Zotero 10 allows multiple collections and libraries to be selected, so it removed `ZoteroPane.getSelectedCollection()` and `getSelectedLibraryID()` in favour of `getSelectedCollections()` and `getSelectedLibraryIDs()`. The singular versions still exist in Zotero 10 as functions that **throw**, so feature detection must test for the _plural_ name. Zotero 7 to 9 have only the singular ones. `selectedCollections()` and `selectedLibraryIDs()` in `src/index.ts` hold this shim; nothing else may call the getters directly.
+- **Toolbar anchor.** The toolbar button anchors to `zotero-tb-lookup` inside `zotero-items-toolbar`. It previously anchored to `zotero-tb-advanced-search`, which does not exist in any of Zotero 7 to 10, so the button silently never rendered. Verify any new anchor id against `chrome/content/zotero/zoteroPane.xhtml` for the versions in the supported range.
 
 ## Key Constraints
 

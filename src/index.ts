@@ -103,10 +103,17 @@ Zotero.MetadataHunter = {
 
 // ── Window UI ──────────────────────────────────────────────────────────────────
 
+// The button is placed after "Add Item by Identifier", the closest built-in
+// action. It previously anchored to "zotero-tb-advanced-search", an element
+// that does not exist in Zotero 7 through 10, so the button never rendered.
+// The toolbar itself is the fallback in case the anchor is removed later.
 function setupWindowToolbar(win: Window) {
   const doc = (win as any).document;
-  const toolbar = doc.getElementById("zotero-tb-advanced-search");
-  if (!toolbar || doc.getElementById(`${config.addonRef}-button`)) return;
+  if (doc.getElementById(`${config.addonRef}-button`)) return;
+
+  const anchor = doc.getElementById("zotero-tb-lookup");
+  const toolbar = doc.getElementById("zotero-items-toolbar");
+  if (!anchor && !toolbar) return;
 
   const btn = doc.createXULElement("toolbarbutton");
   btn.id = `${config.addonRef}-button`;
@@ -119,7 +126,11 @@ function setupWindowToolbar(win: Window) {
       findDOIs();
     }
   });
-  toolbar.parentElement?.insertBefore(btn, toolbar.nextSibling);
+  if (anchor?.parentElement) {
+    anchor.parentElement.insertBefore(btn, anchor.nextSibling);
+  } else {
+    toolbar.appendChild(btn);
+  }
   syncToolbarButton(win);
 }
 
@@ -187,6 +198,56 @@ function teardownWindowKeyShortcut(win: Window) {
     win.removeEventListener("keydown", handler);
     windowKeyHandlers.delete(win);
   }
+}
+
+// ── Item selection ─────────────────────────────────────────────────────────────
+
+// Zotero 10 lets several collections and libraries be selected at once, so it
+// replaced ZoteroPane's singular selection getters with plural ones and made
+// the singular versions throw. Zotero 7 to 9 ship only the singular versions.
+// Detect the plural getter rather than the singular one, because the singular
+// one still exists in Zotero 10 as a function that throws.
+function selectedCollections(ZP: any): any[] {
+  if (typeof ZP.getSelectedCollections === "function") {
+    return ZP.getSelectedCollections() ?? [];
+  }
+  const collection = ZP.getSelectedCollection();
+  return collection ? [collection] : [];
+}
+
+function selectedLibraryIDs(ZP: any): number[] {
+  if (typeof ZP.getSelectedLibraryIDs === "function") {
+    return ZP.getSelectedLibraryIDs() ?? [];
+  }
+  const libraryID = ZP.getSelectedLibraryID();
+  return libraryID == null ? [] : [libraryID];
+}
+
+// The items a library-wide run should act on: the explicit item selection when
+// there is one, otherwise every item in the selected collections, otherwise
+// every item in the selected libraries. Results are de-duplicated by id,
+// because one item can belong to several of the selected collections.
+async function resolveTargetItems(): Promise<any[]> {
+  const ZP = Zotero.getActiveZoteroPane();
+  const selected: any[] = ZP.getSelectedItems();
+  if (selected.length > 0) return selected;
+
+  const byID = new Map<number, any>();
+
+  const collections = selectedCollections(ZP);
+  if (collections.length > 0) {
+    for (const collection of collections) {
+      for (const item of collection.getChildItems()) byID.set(item.id, item);
+    }
+    return [...byID.values()];
+  }
+
+  for (const libraryID of selectedLibraryIDs(ZP)) {
+    for (const item of await Zotero.Items.getAll(libraryID)) {
+      byID.set(item.id, item);
+    }
+  }
+  return [...byID.values()];
 }
 
 // ── Promise utilities ──────────────────────────────────────────────────────────
@@ -927,10 +988,11 @@ function identifyPreprints(items: any[]): any[] {
   return items.filter(isPreprint);
 }
 
-// A published reference is either a DOI or a venue URL (e.g. OpenReview, PMLR).
-// Venues like ICLR publish via OpenReview and never assign DOIs, so URL is the
-// only way to create a properly-sourced item for them.
-type PublishedRef = { doi: string } | { url: string };
+// A published reference is a DOI, a venue URL (e.g. PMLR), or a BibTeX record
+// carried alongside the URL it came from. Venues like ICLR publish via
+// OpenReview and never assign DOIs, so a DOI alone cannot describe them.
+type PublishedRef =
+  { doi: string } | { url: string } | { bibtex: string; url: string };
 
 function isPublishedDOI(doi: string): boolean {
   return !doi.toLowerCase().startsWith("10.48550/arxiv.");
@@ -1206,11 +1268,17 @@ async function findPublishedRefFromOpenReview(
       if (!openReviewNoteHasAuthors(note)) continue;
 
       const forum = note.forum || note.id;
-      if (forum) {
-        return {
-          url: `https://openreview.net/forum?id=${encodeURIComponent(forum)}`,
-        };
-      }
+      if (!forum) continue;
+
+      const url = `https://openreview.net/forum?id=${encodeURIComponent(forum)}`;
+      // Prefer the note's own BibTeX. openreview.net/forum answers non-browser
+      // clients with a 307 to /challenge, so Zotero's web translator runs on
+      // the anti-bot page and reports "No suitable translators found". The
+      // search response already in hand carries a complete record, so the
+      // forum page never has to be fetched. Notes without BibTeX fall back to
+      // the URL, which is the old behaviour.
+      const bibtex = openReviewContentValue(note, "_bibtex");
+      return bibtex ? { bibtex, url } : { url };
     }
   } catch (e) {
     Zotero.debug(`Metadata Hunter: OpenReview preprint lookup failed: ${e}`);
@@ -1318,13 +1386,53 @@ async function createItemFromURL(
   }
 }
 
+// Zotero's bundled BibTeX import translator.
+const BIBTEX_TRANSLATOR_ID = "9cb70025-a888-4a29-a210-93ec52da40d4";
+
+// Import a BibTeX record straight into the library. The translator decides the
+// item type from the entry type, so an @inproceedings becomes a conferencePaper
+// and an @article becomes a journalArticle, and it parses the author list, the
+// venue, and the year for us. Building those fields by hand would duplicate
+// the translator and get the edge cases wrong.
+async function createItemFromBibtex(
+  bibtex: string,
+  url: string,
+  sourceItem: any,
+): Promise<any | null> {
+  try {
+    const translate = new Zotero.Translate.Import();
+    translate.setString(bibtex);
+    translate.setTranslator(BIBTEX_TRANSLATOR_ID);
+    const newItems = await translate.translate({
+      libraryID: sourceItem.libraryID,
+      collections: sourceItem.getCollections(),
+      saveAttachments: false,
+    });
+    const newItem = newItems && newItems.length > 0 ? newItems[0] : null;
+    if (!newItem) return null;
+
+    // OpenReview's BibTeX usually carries the forum URL, but not for every
+    // venue's template. Fill it in so the user can still reach the page.
+    if (!newItem.getField("url")?.trim()) {
+      newItem.setField("url", url);
+      await newItem.saveTx();
+    }
+    return newItem;
+  } catch (e) {
+    Zotero.debug(`Metadata Hunter: Failed to create item from BibTeX: ${e}`);
+    return null;
+  }
+}
+
 async function createItemFromPublished(
   ref: PublishedRef,
   sourceItem: any,
 ): Promise<any | null> {
-  return "doi" in ref
-    ? createItemFromDOI(ref.doi, sourceItem)
-    : createItemFromURL(ref.url, sourceItem);
+  if ("doi" in ref) return createItemFromDOI(ref.doi, sourceItem);
+  if ("bibtex" in ref) {
+    return createItemFromBibtex(ref.bibtex, ref.url, sourceItem);
+  }
+  return createItemFromURL(ref.url, sourceItem);
 }
 
 // Re-parent the source preprint's child attachments and notes onto the new
@@ -1569,21 +1677,8 @@ async function runFindPublishedVersions(
 }
 
 async function findPublishedVersions(): Promise<void> {
-  const ZP = Zotero.getActiveZoteroPane();
-  let items: any[] = ZP.getSelectedItems();
-
-  if (items.length === 0) {
-    const collection = ZP.getSelectedCollection();
-    const libraryID = collection
-      ? collection.libraryID
-      : ZP.getSelectedLibraryID();
-    items = collection
-      ? collection.getChildItems()
-      : await Zotero.Items.getAll(libraryID);
-  }
-
   await runFindPublishedVersions(
-    identifyPreprints(items),
+    identifyPreprints(await resolveTargetItems()),
     "preprint.noneFound",
   );
 }
@@ -2068,21 +2163,8 @@ async function runEnrichMetadata(
 }
 
 async function enrichMetadata(): Promise<void> {
-  const ZP = Zotero.getActiveZoteroPane();
-  let items: any[] = ZP.getSelectedItems();
-
-  if (items.length === 0) {
-    const collection = ZP.getSelectedCollection();
-    const libraryID = collection
-      ? collection.libraryID
-      : ZP.getSelectedLibraryID();
-    items = collection
-      ? collection.getChildItems()
-      : await Zotero.Items.getAll(libraryID);
-  }
-
   await runEnrichMetadata(
-    analyzeItemsForEnrichment(items),
+    analyzeItemsForEnrichment(await resolveTargetItems()),
     "enrich.noneEligible",
   );
 }
@@ -2101,20 +2183,7 @@ async function enrichMetadataForSelected(): Promise<void> {
 async function findDOIs(): Promise<void> {
   if (activeCancel) return; // already running
 
-  const ZP = Zotero.getActiveZoteroPane();
-  let items: any[] = ZP.getSelectedItems();
-
-  if (items.length === 0) {
-    const collection = ZP.getSelectedCollection();
-    const libraryID = collection
-      ? collection.libraryID
-      : ZP.getSelectedLibraryID();
-    items = collection
-      ? collection.getChildItems()
-      : await Zotero.Items.getAll(libraryID);
-  }
-
-  const { toProcess } = analyzeItems(items);
+  const { toProcess } = analyzeItems(await resolveTargetItems());
   if (toProcess.length === 0) {
     showResultPanel(
       getString("findDOI.title"),
