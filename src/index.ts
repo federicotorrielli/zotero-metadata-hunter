@@ -1,4 +1,4 @@
-import { config, version } from "../package.json";
+import { config, homepage, version } from "../package.json";
 import { registerWindowMenus, unregisterWindowMenus } from "./modules/menu";
 import { createProgressPanel, showResultPanel } from "./modules/progress";
 import { getString } from "./utils/locale";
@@ -285,6 +285,11 @@ function withNullAsReject<T>(p: Promise<T | null>): Promise<T> {
 // leaving it on meant a throttled request was killed by our own timeout and
 // then reported as "nothing found". Seeing the failure at once is what lets
 // the caller tell a rate limit apart from a paper that genuinely has no DOI.
+// CrossRef routes requests carrying a contact into its "polite pool", which has
+// much higher rate limits than the anonymous one. The other APIs ignore the
+// extra text. The fragment is stripped because a URL is the useful part.
+const USER_AGENT = `Zotero Metadata Hunter/${version} (+${homepage.replace(/#.*$/, "")})`;
+
 async function httpGet(
   url: string,
   timeoutMs = 10_000,
@@ -292,7 +297,7 @@ async function httpGet(
 ): Promise<any> {
   return withTimeout(
     Zotero.HTTP.request("GET", url, {
-      headers: { "User-Agent": `Zotero Metadata Hunter/${version}` },
+      headers: { "User-Agent": USER_AGENT },
       errorDelayMax: 0,
       ...(successCodes ? { successCodes } : {}),
     }),
@@ -314,28 +319,36 @@ async function httpGetOptional(
   return response.status === 404 ? null : response;
 }
 
-// Counts the sources that threw during one lookup. "Found nothing" and "the
-// request failed" both used to arrive as null, so a rate limit was recorded as
-// a fact about the paper and earned a permanent failure tag. Keeping a count
-// lets the caller tag only when every source actually answered.
+// How each source behaved during one lookup. "Answered" covers a source that
+// returned a verdict, including the verdict "I hold no record of this paper".
+// "Failed" covers a source that threw.
 //
-// Read the count only once every source has settled. Promise.any resolves
+// A single source answering "no record" is evidence about the paper, so it is
+// enough to justify a failure tag. Only when no source answered at all is the
+// absence unproven. An earlier version treated any failure as disqualifying,
+// which suppressed the tag for two thirds of a real run, because with four
+// sources something throws most of the time.
+//
+// Read the tally only once every source has settled. Promise.any resolves
 // while its losers are still in flight, so an early read is a moving target.
-interface SourceFailures {
-  count: number;
+interface SourceTally {
+  answered: number;
+  failed: string[];
 }
 
-// Runs one source in a sequential cascade. A throw becomes a recorded failure
-// and a null, so the cascade carries on with the next source.
+// Runs one source in a sequential cascade. A throw is recorded and turned into
+// a null, so the cascade carries on with the next source.
 async function runSource<T>(
-  failures: SourceFailures,
+  tally: SourceTally,
   source: string,
   fn: () => Promise<T | null>,
 ): Promise<T | null> {
   try {
-    return await fn();
+    const value = await fn();
+    tally.answered++;
+    return value;
   } catch (e) {
-    failures.count++;
+    tally.failed.push(source);
     Zotero.debug(`Metadata Hunter: ${source} failed: ${e}`);
     return null;
   }
@@ -344,17 +357,23 @@ async function runSource<T>(
 // Same bookkeeping for a raced lookup. The error is recorded and then rethrown,
 // so Promise.any goes on waiting for the other sources. Wrap this inside
 // withNullAsReject rather than outside it, otherwise a source that legitimately
-// found nothing is counted as a failure.
+// found nothing is recorded as a failure instead of an answer.
 function trackSource<T>(
-  failures: SourceFailures,
+  tally: SourceTally,
   source: string,
   p: Promise<T>,
 ): Promise<T> {
-  return p.catch((e) => {
-    failures.count++;
-    Zotero.debug(`Metadata Hunter: ${source} failed: ${e}`);
-    throw e;
-  });
+  return p.then(
+    (value) => {
+      tally.answered++;
+      return value;
+    },
+    (e) => {
+      tally.failed.push(source);
+      Zotero.debug(`Metadata Hunter: ${source} failed: ${e}`);
+      throw e;
+    },
+  );
 }
 
 function formatEta(
@@ -649,24 +668,27 @@ async function findDOIFromSemanticScholar(
 // can be assigned their canonical arXiv DOI when missing.
 interface DOILookup {
   result: DOIResult | null;
-  // True when at least one source threw. The absence of a DOI is then
-  // unproven, so the caller must not write a failure tag for it.
-  failed: boolean;
+  // True when no source gave a verdict at all. The absence of a DOI is then
+  // unproven and must not be tagged. One source answering "no record" is
+  // enough to make it false.
+  unchecked: boolean;
+  // Names of the sources that threw, for the result panel.
+  failedSources: string[];
 }
 
 async function findDOIForItem(item: any): Promise<DOILookup> {
   const doi = item.getField("DOI")?.trim();
   if (!item.isRegularItem() || (doi && doi !== "-"))
-    return { result: null, failed: false };
+    return { result: null, unchecked: false, failedSources: [] };
 
   const title = item.getField("title");
-  if (!title) return { result: null, failed: false };
+  if (!title) return { result: null, unchecked: false, failedSources: [] };
 
   const requirePublished = !isPreprint(item);
   const accept = (r: DOIResult | null): DOIResult | null =>
     r && (!requirePublished || isPublishedDOI(r.doi)) ? r : null;
 
-  const failures: SourceFailures = { count: 0 };
+  const tally: SourceTally = { answered: 0, failed: [] };
   const sources: [string, () => Promise<DOIResult | null>][] = [
     ["CrossRef", () => findDOIFromCrossRef(item, title)],
     ["DBLP", () => findDOIFromDBLP(item, title)],
@@ -675,11 +697,17 @@ async function findDOIForItem(item: any): Promise<DOILookup> {
   ];
 
   for (const [name, fn] of sources) {
-    const found = accept(await runSource(failures, name, fn));
-    if (found) return { result: found, failed: false };
+    const found = accept(await runSource(tally, name, fn));
+    if (found) {
+      return { result: found, unchecked: false, failedSources: tally.failed };
+    }
   }
 
-  return { result: null, failed: failures.count > 0 };
+  return {
+    result: null,
+    unchecked: tally.answered === 0,
+    failedSources: tally.failed,
+  };
 }
 
 // ── Abstract finding ───────────────────────────────────────────────────────────
@@ -740,9 +768,9 @@ async function findAbstractForItem(
 ): Promise<string | null> {
   if (item.getField("abstractNote")?.trim()) return null;
 
-  const failures: SourceFailures = { count: 0 };
+  const tally: SourceTally = { answered: 0, failed: [] };
   const race = (name: string, p: Promise<string | null>) =>
-    withNullAsReject(trackSource(failures, name, withTimeout(p, 8_000)));
+    withNullAsReject(trackSource(tally, name, withTimeout(p, 8_000)));
 
   try {
     return await Promise.any([
@@ -796,9 +824,11 @@ interface ProcessResult {
   foundAbstracts: number;
   processed: number;
   taggedNoDOI: number;
-  // Items left alone because a source threw. They are neither resolved nor
+  // Items left alone because no source answered. They are neither resolved nor
   // tagged, so the panel has to name them or they vanish from the report.
   skipped: number;
+  // Source name to the number of items it failed for, across the whole run.
+  sourceFailures: Map<string, number>;
   cancelled: boolean;
   hadApiErrors: boolean;
 }
@@ -830,6 +860,7 @@ async function processItems(
     processed: 0,
     taggedNoDOI: 0,
     skipped: 0,
+    sourceFailures: new Map(),
     cancelled: false,
     hadApiErrors: false,
   };
@@ -877,6 +908,7 @@ async function processItems(
 
           if (!hadDOI) {
             const lookup = await findDOIForItem(item);
+            recordSourceFailures(result.sourceFailures, lookup.failedSources);
             if (lookup.result) {
               doi = lookup.result.doi;
               // May be non-null when Semantic Scholar won the race
@@ -886,10 +918,10 @@ async function processItems(
               result.foundDOIs++;
               // Clear any prior "no DOI" mark from a previous run
               await clearFailureTags(item, [TAG_NO_DOI]);
-            } else if (lookup.failed) {
-              // A source threw, most often a rate limit. The item may well have
-              // a DOI, so count it as unchecked instead of writing a tag the
-              // user would have to clear by hand.
+            } else if (lookup.unchecked) {
+              // Not one source gave a verdict, so the absence of a DOI is
+              // unproven. Count the item as unchecked rather than write a tag
+              // the user would have to clear by hand.
               result.skipped++;
             } else {
               await setFailureTag(item, TAG_NO_DOI);
@@ -944,6 +976,24 @@ async function processItems(
 
 // ── Result message ─────────────────────────────────────────────────────────────
 
+// Fold one lookup's failed sources into the run-wide tally.
+function recordSourceFailures(
+  into: Map<string, number>,
+  sources: string[],
+): void {
+  for (const source of sources) {
+    into.set(source, (into.get(source) ?? 0) + 1);
+  }
+}
+
+// "Semantic Scholar (4), CrossRef (2)", worst offender first.
+function formatSourceFailures(counts: Map<string, number>): string {
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([source, n]) => `${source} (${n})`)
+    .join(", ");
+}
+
 // Tail shared by all three panels: how many items a failing source stopped us
 // from checking, and a generic warning when something else went wrong. The
 // specific count already implies the warning, so the two never appear together.
@@ -951,9 +1001,20 @@ function buildSkippedTail(
   skipped: number,
   unit: string,
   hadApiErrors: boolean,
+  sourceFailures: Map<string, number>,
 ): string {
-  if (skipped > 0) return getString("common.skipped", { count: skipped, unit });
-  return hadApiErrors ? getString("common.apiWarning") : "";
+  let tail = "";
+  if (skipped > 0) {
+    tail += getString("common.skipped", { count: skipped, unit });
+  }
+  if (sourceFailures.size > 0) {
+    tail += getString("common.sourceFailures", {
+      sources: formatSourceFailures(sourceFailures),
+    });
+  } else if (hadApiErrors) {
+    tail += getString("common.apiWarning");
+  }
+  return tail;
 }
 
 function buildResultMessage(r: ProcessResult): string {
@@ -991,7 +1052,12 @@ function buildResultMessage(r: ProcessResult): string {
       tag: TAG_NO_DOI,
     });
   }
-  msg += buildSkippedTail(r.skipped, "item(s)", r.hadApiErrors);
+  msg += buildSkippedTail(
+    r.skipped,
+    "item(s)",
+    r.hadApiErrors,
+    r.sourceFailures,
+  );
   return msg;
 }
 
@@ -1323,29 +1389,32 @@ async function findPublishedRefFromOpenReview(
 
 interface PublishedLookup {
   ref: PublishedRef | null;
-  // Same meaning as DOILookup.failed: a source threw, so "no published
-  // version" is unproven and must not be tagged.
-  failed: boolean;
+  // Same meaning as DOILookup.unchecked: no source gave a verdict, so "no
+  // published version" is unproven and must not be tagged.
+  unchecked: boolean;
+  failedSources: string[];
 }
 
 async function findPublishedDOI(item: any): Promise<PublishedLookup> {
   const title = item.getField("title");
-  if (!title) return { ref: null, failed: false };
+  if (!title) return { ref: null, unchecked: false, failedSources: [] };
 
-  const failures: SourceFailures = { count: 0 };
+  const tally: SourceTally = { answered: 0, failed: [] };
 
   const arxivId = extractArxivId(item);
   if (arxivId) {
-    const doi = await runSource(failures, "arXiv ID lookup", () =>
+    const doi = await runSource(tally, "arXiv ID lookup", () =>
       findPublishedDOIFromArxivById(arxivId),
     );
-    if (doi) return { ref: { doi }, failed: false };
+    if (doi) {
+      return { ref: { doi }, unchecked: false, failedSources: tally.failed };
+    }
   }
 
   // Race the fallback sources. The first non-null result wins, the same pattern
   // as findAbstractForItem.
   const race = (name: string, p: Promise<PublishedRef | null>) =>
-    withNullAsReject(trackSource(failures, name, withTimeout(p, 10_000)));
+    withNullAsReject(trackSource(tally, name, withTimeout(p, 10_000)));
 
   try {
     const ref = await Promise.any([
@@ -1364,10 +1433,14 @@ async function findPublishedDOI(item: any): Promise<PublishedLookup> {
       race("DBLP", findPublishedRefFromDBLP(item, title)),
       race("OpenReview", findPublishedRefFromOpenReview(title)),
     ]);
-    return { ref, failed: false };
+    return { ref, unchecked: false, failedSources: tally.failed };
   } catch {
-    // Every source settled by now, so the count is final.
-    return { ref: null, failed: failures.count > 0 };
+    // Every source has settled by now, so the tally is final.
+    return {
+      ref: null,
+      unchecked: tally.answered === 0,
+      failedSources: tally.failed,
+    };
   }
 }
 
@@ -1537,6 +1610,7 @@ interface PreprintResult {
   taggedFailed: number;
   convertedToPreprint: number;
   skipped: number;
+  sourceFailures: Map<string, number>;
   cancelled: boolean;
   hadApiErrors: boolean;
 }
@@ -1553,6 +1627,7 @@ async function processPreprints(
     taggedFailed: 0,
     convertedToPreprint: 0,
     skipped: 0,
+    sourceFailures: new Map(),
     cancelled: false,
     hadApiErrors: false,
   };
@@ -1593,6 +1668,7 @@ async function processPreprints(
         if (cancel.requested) return;
         try {
           const lookup = await findPublishedDOI(item);
+          recordSourceFailures(result.sourceFailures, lookup.failedSources);
           const ref = lookup.ref;
           const newItem = ref ? await createItemFromPublished(ref, item) : null;
 
@@ -1615,9 +1691,9 @@ async function processPreprints(
             if (ref) {
               await setFailureTag(item, TAG_UPDATE_FAILED);
               result.taggedFailed++;
-            } else if (lookup.failed) {
-              // A source threw, so the absence of a published version is
-              // unproven. Count it as unchecked rather than tag it.
+            } else if (lookup.unchecked) {
+              // Not one source gave a verdict, so the absence of a published
+              // version is unproven. Count it as unchecked rather than tag it.
               result.skipped++;
             } else {
               await setFailureTag(item, TAG_NO_PUBLISHED);
@@ -1693,7 +1769,12 @@ function buildPreprintResultMessage(r: PreprintResult): string {
       tag: TAG_UPDATE_FAILED,
     });
   }
-  msg += buildSkippedTail(r.skipped, "preprint(s)", r.hadApiErrors);
+  msg += buildSkippedTail(
+    r.skipped,
+    "preprint(s)",
+    r.hadApiErrors,
+    r.sourceFailures,
+  );
   return msg;
 }
 
@@ -1969,8 +2050,10 @@ interface EnrichOutcome {
   skipped?: boolean;
   noDOI?: boolean;
   failed?: boolean;
-  // A source threw. Nothing is tagged; the run reports an API warning instead.
-  apiError?: boolean;
+  // No source answered. Nothing is tagged; the run reports the gap instead.
+  unchecked?: boolean;
+  // Sources that threw during this item's lookups, for the run-wide tally.
+  failedSources?: string[];
   changed?: string[];
 }
 
@@ -1981,9 +2064,11 @@ async function enrichItemMetadata(item: any): Promise<EnrichOutcome> {
   if (!doi || doi === "-") {
     const lookup = await findDOIForItem(item);
     if (!lookup.result) {
-      if (lookup.failed) return { apiError: true };
+      if (lookup.unchecked) {
+        return { unchecked: true, failedSources: lookup.failedSources };
+      }
       await setFailureTag(item, TAG_NO_DOI);
-      return { noDOI: true };
+      return { noDOI: true, failedSources: lookup.failedSources };
     }
     item.setField("DOI", lookup.result.doi);
     // Keep the abstract that came bundled with the DOI lookup if Semantic
@@ -2012,8 +2097,8 @@ async function enrichItemMetadata(item: any): Promise<EnrichOutcome> {
       item.setField("DOI", ref.doi);
       await item.saveTx();
       doi = ref.doi;
-    } else if (upgraded.failed) {
-      return { apiError: true };
+    } else if (upgraded.unchecked) {
+      return { unchecked: true, failedSources: upgraded.failedSources };
     } else {
       await setFailureTag(item, TAG_NO_RICHER_RECORD);
       return { changed: [] };
@@ -2053,6 +2138,7 @@ interface EnrichResult {
   taggedNoRicher: number;
   taggedFailed: number;
   skipped: number;
+  sourceFailures: Map<string, number>;
   cancelled: boolean;
   hadApiErrors: boolean;
 }
@@ -2069,6 +2155,7 @@ async function processEnrichments(
     taggedNoRicher: 0,
     taggedFailed: 0,
     skipped: 0,
+    sourceFailures: new Map(),
     cancelled: false,
     hadApiErrors: false,
   };
@@ -2110,7 +2197,11 @@ async function processEnrichments(
         if (cancel.requested) return;
         try {
           const outcome = await enrichItemMetadata(item);
-          if (outcome.apiError) {
+          recordSourceFailures(
+            result.sourceFailures,
+            outcome.failedSources ?? [],
+          );
+          if (outcome.unchecked) {
             result.skipped++;
           } else if (outcome.noDOI) {
             result.taggedNoDOI++;
@@ -2189,7 +2280,12 @@ function buildEnrichResultMessage(r: EnrichResult): string {
       tag: TAG_UPDATE_FAILED,
     });
   }
-  msg += buildSkippedTail(r.skipped, "item(s)", r.hadApiErrors);
+  msg += buildSkippedTail(
+    r.skipped,
+    "item(s)",
+    r.hadApiErrors,
+    r.sourceFailures,
+  );
   return msg;
 }
 
