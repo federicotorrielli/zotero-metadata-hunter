@@ -118,7 +118,15 @@ function setupWindowToolbar(win: Window) {
   const btn = doc.createXULElement("toolbarbutton");
   btn.id = `${config.addonRef}-button`;
   btn.className = "zotero-tb-button";
-  btn.setAttribute("image", pluginRootURI + "icons/find-metadata.svg");
+  // Zotero draws every toolbar icon at 20x20, so the toolbar gets its own
+  // asset. The 16px file stays for the menus.
+  btn.setAttribute("image", pluginRootURI + "icons/find-metadata-20.svg");
+  // Zotero colours toolbar icons through -moz-context-properties, which its
+  // generic `toolbarbutton` rule already enables. The matching
+  // `fill: currentColor` is applied per built-in button id, so our button has
+  // to set it itself. Without it the icon paints black and vanishes into a
+  // dark toolbar.
+  btn.style.fill = "currentColor";
   btn.addEventListener("command", () => {
     if (activeCancel) {
       activeCancel.cancel();
