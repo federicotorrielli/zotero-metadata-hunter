@@ -6,7 +6,9 @@ export function getString(
     // Shared tails. Both read the same in every flow, so they live once here
     // and take the unit as a parameter.
     "common.skipped":
-      "\n\n${count} ${unit} could not be checked because a source did not answer. This is usually a rate limit. Those items were left untagged. Run the same action again later to retry them.",
+      "\n\n${count} ${unit} could not be checked. Not one source answered for them. They were left untagged. Run the same action again later to retry them.",
+    "common.sourceFailures":
+      "\n\nSources that failed at least once during this run: ${sources}. This is usually a rate limit. Results may be less complete than usual.",
     "common.apiWarning":
       "\n\nSome requests failed. The counts above may be incomplete.",
 
