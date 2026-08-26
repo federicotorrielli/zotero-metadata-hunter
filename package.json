@@ -1,6 +1,6 @@
 {
   "name": "zotero-metadata-hunter",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "packageManager": "pnpm@11.5.0",
   "description": "A Zotero plugin to find and add missing DOI numbers and abstracts to references",
   "config": {

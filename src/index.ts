@@ -366,9 +366,12 @@ function formatEta(
   const elapsed = Date.now() - startTime;
   const msRemaining = (elapsed / processed) * (total - processed);
   if (msRemaining < 5_000) return "";
-  if (msRemaining < 60_000)
-    return ` • ~${Math.round(msRemaining / 1_000)}s left`;
-  return ` • ~${Math.round(msRemaining / 60_000)}m left`;
+  if (msRemaining < 60_000) {
+    const seconds = Math.round(msRemaining / 1_000);
+    return ` About ${seconds} second${seconds === 1 ? "" : "s"} left.`;
+  }
+  const minutes = Math.round(msRemaining / 60_000);
+  return ` About ${minutes} minute${minutes === 1 ? "" : "s"} left.`;
 }
 
 // ── Title matching ─────────────────────────────────────────────────────────────
@@ -386,8 +389,8 @@ function cleanTitleForQuery(title: string): string {
   // Drop subtitle (after colon or em-dash) only when the pre-colon fragment is long
   // enough to be a meaningful standalone query (≥4 words). Short main titles like
   // "Machine generated text: a comprehensive survey..." or "BERT: Pre-training of..."
-  // rely on their subtitle for distinctiveness — stripping them yields a generic phrase
-  // that returns unrelated results from every API.
+  // rely on their subtitle for distinctiveness. Stripping them yields a generic
+  // phrase that returns unrelated results from every API.
   const colonIdx = decoded.search(/\s*[:\u2014]/);
   const fragment =
     colonIdx !== -1 ? decoded.slice(0, colonIdx).trim() : decoded;
@@ -425,7 +428,7 @@ function isTitleMatch(title1: string, title2: string): boolean {
 
   // Gate ALL fuzzy checks behind the length ratio. A short string being a substring
   // of a long one (e.g. "Large Language Models" inside "A Watermark for Large Language
-  // Models") does not mean they are the same paper — apply the same ≤15% length
+  // Models") does not mean they are the same paper. Apply the same 15% length
   // difference requirement before both the substring and Levenshtein checks.
   const longer = Math.max(n1.length, n2.length);
   const shorter = Math.min(n1.length, n2.length);
@@ -614,8 +617,9 @@ async function findDOIFromArXiv(
 
 // Semantic Scholar: title match + DOI + abstract in a single request.
 // Uses /paper/search/match which is designed for exact title lookup and returns
-// the single best-scoring result directly. Author is intentionally excluded —
-// this endpoint is a pure title matcher and extra terms break its scoring.
+// the single best-scoring result directly. Author is intentionally excluded,
+// because this endpoint is a pure title matcher and extra terms break its
+// scoring.
 async function findDOIFromSemanticScholar(
   _item: any,
   title: string,
@@ -792,6 +796,9 @@ interface ProcessResult {
   foundAbstracts: number;
   processed: number;
   taggedNoDOI: number;
+  // Items left alone because a source threw. They are neither resolved nor
+  // tagged, so the panel has to name them or they vanish from the report.
+  skipped: number;
   cancelled: boolean;
   hadApiErrors: boolean;
 }
@@ -822,6 +829,7 @@ async function processItems(
     foundAbstracts: 0,
     processed: 0,
     taggedNoDOI: 0,
+    skipped: 0,
     cancelled: false,
     hadApiErrors: false,
   };
@@ -880,9 +888,9 @@ async function processItems(
               await clearFailureTags(item, [TAG_NO_DOI]);
             } else if (lookup.failed) {
               // A source threw, most often a rate limit. The item may well have
-              // a DOI, so warn instead of writing a tag the user would have to
-              // clear by hand.
-              result.hadApiErrors = true;
+              // a DOI, so count it as unchecked instead of writing a tag the
+              // user would have to clear by hand.
+              result.skipped++;
             } else {
               await setFailureTag(item, TAG_NO_DOI);
               result.taggedNoDOI++;
@@ -936,6 +944,18 @@ async function processItems(
 
 // ── Result message ─────────────────────────────────────────────────────────────
 
+// Tail shared by all three panels: how many items a failing source stopped us
+// from checking, and a generic warning when something else went wrong. The
+// specific count already implies the warning, so the two never appear together.
+function buildSkippedTail(
+  skipped: number,
+  unit: string,
+  hadApiErrors: boolean,
+): string {
+  if (skipped > 0) return getString("common.skipped", { count: skipped, unit });
+  return hadApiErrors ? getString("common.apiWarning") : "";
+}
+
 function buildResultMessage(r: ProcessResult): string {
   let msg: string;
 
@@ -946,18 +966,22 @@ function buildResultMessage(r: ProcessResult): string {
       abstracts: r.foundAbstracts,
     });
   } else if (r.foundDOIs === 0 && r.foundAbstracts === 0) {
-    msg = getString("findDOI.noneFound");
+    msg = getString("findDOI.noneFound", { total: r.processed });
   } else if (r.foundDOIs === 0) {
     msg = getString("findDOI.foundAbstractsOnly", {
+      total: r.processed,
       abstracts: r.foundAbstracts,
     });
   } else if (r.foundAbstracts === 0) {
-    msg = getString("findDOI.foundDOIsOnly", { dois: r.foundDOIs });
+    msg = getString("findDOI.foundDOIsOnly", {
+      total: r.processed,
+      dois: r.foundDOIs,
+    });
   } else {
     msg = getString("findDOI.found", {
+      total: r.processed,
       dois: r.foundDOIs,
       abstracts: r.foundAbstracts,
-      total: r.processed,
     });
   }
 
@@ -967,7 +991,7 @@ function buildResultMessage(r: ProcessResult): string {
       tag: TAG_NO_DOI,
     });
   }
-  if (r.hadApiErrors) msg += getString("findDOI.apiWarning");
+  msg += buildSkippedTail(r.skipped, "item(s)", r.hadApiErrors);
   return msg;
 }
 
@@ -1026,7 +1050,7 @@ function extractArxivId(item: any): string | null {
 function isPreprint(item: any): boolean {
   if (!item.isRegularItem()) return false;
   if (item.itemType === "preprint") return true;
-  // CoRR is DBLP's label for arXiv — always a preprint regardless of item type
+  // CoRR is DBLP's label for arXiv, so it is always a preprint whatever the item type
   // (Zotero stores CoRR entries as journalArticle, so this must come before the type gate)
   const pub: string = (
     item.getField("publicationTitle") ??
@@ -1060,7 +1084,7 @@ function isPublishedVenue(venue: string): boolean {
   return !PREPRINT_VENUES.has(venue.toLowerCase().trim());
 }
 
-// Direct arXiv ID lookup — extracts the journal DOI the author reported on arXiv.
+// Direct arXiv ID lookup. Extracts the journal DOI the author reported on arXiv.
 // NOT a title search; fetches metadata for the specific arXiv entry only.
 async function findPublishedDOIFromArxivById(
   arxivId: string,
@@ -1318,8 +1342,8 @@ async function findPublishedDOI(item: any): Promise<PublishedLookup> {
     if (doi) return { ref: { doi }, failed: false };
   }
 
-  // Race fallback sources — first non-null result wins,
-  // same pattern as findAbstractForItem.
+  // Race the fallback sources. The first non-null result wins, the same pattern
+  // as findAbstractForItem.
   const race = (name: string, p: Promise<PublishedRef | null>) =>
     withNullAsReject(trackSource(failures, name, withTimeout(p, 10_000)));
 
@@ -1347,7 +1371,7 @@ async function findPublishedDOI(item: any): Promise<PublishedLookup> {
   }
 }
 
-// Use Zotero's Translate.Search API — same mechanism as "Add Item by Identifier".
+// Use Zotero's Translate.Search API, the same mechanism as "Add Item by Identifier".
 // Returns the newly created item (or null). The caller needs the item handle to
 // re-parent attachments/notes before the source preprint is trashed.
 async function createItemFromDOI(
@@ -1374,7 +1398,7 @@ async function createItemFromDOI(
   }
 }
 
-// Use Zotero's web translator — same mechanism as dragging a URL into Zotero.
+// Use Zotero's web translator, the same mechanism as dragging a URL into Zotero.
 // Handles venues like ICLR that publish via OpenReview without assigning DOIs.
 async function createItemFromURL(
   url: string,
@@ -1456,7 +1480,7 @@ async function createItemFromPublished(
 // Re-parent the source preprint's child attachments and notes onto the new
 // published-version item. Zotero trashes children with their parent, so without
 // this step user-added PDFs, annotations, and notes go to Trash alongside the
-// preprint — silent data loss if Trash is later emptied.
+// preprint. That is silent data loss once the Trash is emptied.
 async function migrateChildrenToItem(
   sourceItem: any,
   newItem: any,
@@ -1512,6 +1536,7 @@ interface PreprintResult {
   taggedNoPublished: number;
   taggedFailed: number;
   convertedToPreprint: number;
+  skipped: number;
   cancelled: boolean;
   hadApiErrors: boolean;
 }
@@ -1527,6 +1552,7 @@ async function processPreprints(
     taggedNoPublished: 0,
     taggedFailed: 0,
     convertedToPreprint: 0,
+    skipped: 0,
     cancelled: false,
     hadApiErrors: false,
   };
@@ -1591,8 +1617,8 @@ async function processPreprints(
               result.taggedFailed++;
             } else if (lookup.failed) {
               // A source threw, so the absence of a published version is
-              // unproven. Warn rather than tag.
-              result.hadApiErrors = true;
+              // unproven. Count it as unchecked rather than tag it.
+              result.skipped++;
             } else {
               await setFailureTag(item, TAG_NO_PUBLISHED);
               result.taggedNoPublished++;
@@ -1667,7 +1693,7 @@ function buildPreprintResultMessage(r: PreprintResult): string {
       tag: TAG_UPDATE_FAILED,
     });
   }
-  if (r.hadApiErrors) msg += getString("preprint.apiWarning");
+  msg += buildSkippedTail(r.skipped, "preprint(s)", r.hadApiErrors);
   return msg;
 }
 
@@ -1691,7 +1717,7 @@ async function runFindPublishedVersions(
     showResultPanel(
       getString("preprint.title"),
       buildPreprintResultMessage(result),
-      result.hadApiErrors,
+      result.hadApiErrors || result.skipped > 0,
     );
   } finally {
     activeCancel = null;
@@ -1794,7 +1820,7 @@ function normalizeScratch(scratch: any): NormalizedRecord {
 }
 
 // Translator-by-DOI run that strips the scratch item afterwards. Same machinery
-// as "Add Item by Identifier" — the hydrated item is fully populated by Zotero's
+// as "Add Item by Identifier". The hydrated item is fully populated by Zotero's
 // CrossRef translator, including itemType. translate.translate() persists the
 // scratch to the library, so we normalize its data into a plain record inside
 // the try block (evaluated before finally) and erase the scratch in finally.
@@ -1897,7 +1923,7 @@ function enrichItemFromMetadata(
   }
 
   // Date is fill-missing too, but the gate is "no 4-digit year" rather than
-  // "empty" — Scholar imports often store just a year string and we want to
+  // "empty". Scholar imports often store just a year string, and we want to
   // upgrade those to a full YYYY-MM-DD when CrossRef has it.
   const payloadDate = (payload.fields.date ?? "").trim();
   if (payloadDate) {
@@ -1961,7 +1987,7 @@ async function enrichItemMetadata(item: any): Promise<EnrichOutcome> {
     }
     item.setField("DOI", lookup.result.doi);
     // Keep the abstract that came bundled with the DOI lookup if Semantic
-    // Scholar won and the item has no abstract yet — saves one round trip.
+    // Scholar won and the item has no abstract yet. That saves one round trip.
     if (lookup.result.abstract && !item.getField("abstractNote")?.trim()) {
       item.setField("abstractNote", lookup.result.abstract);
     }
@@ -2026,6 +2052,7 @@ interface EnrichResult {
   taggedNoDOI: number;
   taggedNoRicher: number;
   taggedFailed: number;
+  skipped: number;
   cancelled: boolean;
   hadApiErrors: boolean;
 }
@@ -2041,6 +2068,7 @@ async function processEnrichments(
     taggedNoDOI: 0,
     taggedNoRicher: 0,
     taggedFailed: 0,
+    skipped: 0,
     cancelled: false,
     hadApiErrors: false,
   };
@@ -2083,7 +2111,7 @@ async function processEnrichments(
         try {
           const outcome = await enrichItemMetadata(item);
           if (outcome.apiError) {
-            result.hadApiErrors = true;
+            result.skipped++;
           } else if (outcome.noDOI) {
             result.taggedNoDOI++;
           } else if (outcome.failed) {
@@ -2161,7 +2189,7 @@ function buildEnrichResultMessage(r: EnrichResult): string {
       tag: TAG_UPDATE_FAILED,
     });
   }
-  if (r.hadApiErrors) msg += getString("enrich.apiWarning");
+  msg += buildSkippedTail(r.skipped, "item(s)", r.hadApiErrors);
   return msg;
 }
 
@@ -2185,7 +2213,7 @@ async function runEnrichMetadata(
     showResultPanel(
       getString("enrich.title"),
       buildEnrichResultMessage(result),
-      result.hadApiErrors,
+      result.hadApiErrors || result.skipped > 0,
     );
   } finally {
     activeCancel = null;
@@ -2232,7 +2260,7 @@ async function findDOIs(): Promise<void> {
     showResultPanel(
       getString("findDOI.title"),
       buildResultMessage(result),
-      result.hadApiErrors,
+      result.hadApiErrors || result.skipped > 0,
     );
   } finally {
     activeCancel = null;
@@ -2263,7 +2291,7 @@ async function findDOIsForSelected(): Promise<void> {
     showResultPanel(
       getString("findDOI.title"),
       buildResultMessage(result),
-      result.hadApiErrors,
+      result.hadApiErrors || result.skipped > 0,
     );
   } finally {
     activeCancel = null;
