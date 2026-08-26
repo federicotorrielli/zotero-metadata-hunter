@@ -108,7 +108,10 @@ function createCard(title: string, body: string, variant: string): Card | null {
   return { win, doc, panel, bodyEl };
 }
 
-export function createProgressPanel(title: string, hint: string): ProgressPanel {
+export function createProgressPanel(
+  title: string,
+  hint: string,
+): ProgressPanel {
   const card = createCard(title, hint, "mh-card-progress");
   if (!card) return { update() {}, close() {} };
 

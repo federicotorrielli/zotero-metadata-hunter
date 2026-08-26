@@ -10,12 +10,10 @@ Zotero Metadata Hunter is a Zotero plugin (addon ID: `metadatahunter@federicotor
 
 ```bash
 pnpm run build       # TypeScript check + esbuild + XPI creation (production)
-pnpm run start       # Development mode with file watching + live injection into Zotero
-pnpm run stop        # Stop development server
-pnpm run lint        # Prettier formatting + ESLint fixing
+pnpm run lint         # Prettier formatting + ESLint fixing (flat config in eslint.config.mjs)
 ```
 
-There are no tests configured in this project.
+There are no tests configured in this project, and there is no watch mode. To run from source, point a Zotero extension proxy file at `build/addon` (see the README) and restart Zotero after each build.
 
 ## Releasing
 
@@ -50,6 +48,12 @@ The plugin is TypeScript bundled via esbuild into an IIFE (Firefox 128 target). 
 - `resolveTargetItems()` is the single entry point for "what should this run act on": explicit item selection, else the selected collections, else the selected libraries, de-duplicated by id. All three library-wide actions go through it
 
 **Failure tags** (`TAG_NO_DOI`, `TAG_NO_PUBLISHED`, `TAG_UPDATE_FAILED`, `TAG_NO_RICHER_RECORD` at the top of `src/index.ts`): items that can't be resolved get a persistent Zotero tag so users can filter/retry. Tags are cleared automatically on a subsequent successful run — any code path that resolves an item must call the tag-removal helper, or stale failure tags will accumulate.
+
+**A failure tag is a claim about the paper, never about the network.** `findDOIForItem` and `findPublishedDOI` return `{result/ref, failed}`, where `failed` means at least one source threw. Callers write a tag only when `failed` is false; otherwise they set `hadApiErrors` and the result panel warns. This matters because `Zotero.HTTP.request` retries 429 and 5xx internally with a backoff that runs up to an hour by default, far past our own timeout, so a rate limit used to arrive as a plain `null` and get recorded as "this paper has no DOI". `httpGet` passes `errorDelayMax: 0` to surface the throttle immediately instead.
+
+Failures are counted through `runSource` (sequential cascades) and `trackSource` (raced lookups); source functions themselves no longer catch, so a new source needs no error handling of its own. Wrap `trackSource` *inside* `withNullAsReject`, never outside, or a source that legitimately found nothing is counted as a failure. Read `failures.count` only after every source has settled, which for `Promise.any` means only in the rejection path.
+
+**404 does not always mean failure.** Semantic Scholar's `/paper/search/match` answers 404 with `{"error":"Title match not found"}` for a title it cannot match, and both Semantic Scholar and OpenAlex answer 404 for a DOI they do not hold. Those four call sites use `httpGetOptional`, which adds 404 to `successCodes` and returns `null`. Treating them as failures would suppress `TAG_NO_DOI` for every paper those sources do not know.
 
 **Metadata enrichment** (`enrichItemMetadata`, `processEnrichments`, `enrichMetadata`, `enrichMetadataForSelected` in `src/index.ts`): for non-preprint regular items with sparse fields, pulls the canonical record by DOI through `Zotero.Translate.Search` (same machinery as "Add Item by Identifier") and merges fields onto the existing item in place. If the item has no DOI, runs `findDOIForItem` first. Per-field merge policy lives in `enrichItemFromMetadata`: scalar fields like venue/volume/pages/ISSN are fill-missing-only with `Zotero.ItemFields.isValidForType` gating; abstract is replaced when existing is empty or suspiciously short (< 200 chars); creator list is replaced when existing has fewer than 2 entries or is strictly shorter than hydrated with a shared surname; item type is set directly from the translator's choice. `analyzeItemsForEnrichment` filters library-wide runs to items missing at least one of `{publicationTitle, proceedingsTitle, abstractNote, pages, volume}`; right-click runs respect the user's selection but still skip preprints.
 
