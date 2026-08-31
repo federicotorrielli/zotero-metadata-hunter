@@ -547,6 +547,164 @@ async function findDOIFromCrossRef(
   return null;
 }
 
+// ── DBLP hosts ─────────────────────────────────────────────────────────────────
+
+// dblp.org has frequent downtime, and the two public copies of it run on
+// separate machines that fail on their own schedule. While this code was
+// written, dblp.uni-trier.de returned HTTP 500 for every search while the
+// other two hosts worked. The host to use is therefore chosen at run time.
+//
+// The health check has to be a real search request. The Trier fault was in the
+// search backend, and the front page of that same domain kept returning 200,
+// so a HEAD request on the root would have picked the one host unable to serve
+// a lookup.
+const DBLP_HOSTS = [
+  "https://dblp.org",
+  "https://dblp.dagstuhl.de",
+  "https://dblp.uni-trier.de",
+];
+
+// A DBLP of the user's own, set in the preferences pane. Anything that serves
+// the /search/publ/api contract fits.
+const DBLP_HOST_PREF = `${config.prefsPrefix}.dblpHost`;
+
+// Short on purpose. Three hosts are checked at once, so the slowest one sets
+// the delay before the first DBLP lookup of the session.
+const DBLP_CHECK_TIMEOUT_MS = 5_000;
+
+// How long DBLP is skipped once every host has failed. Without this pause, a
+// library-wide run would spend one timeout per host per item on a service that
+// is clearly unreachable, which costs more time than all the other sources put
+// together.
+const DBLP_RETRY_PAUSE_MS = 60_000;
+
+// Session state. The chosen host is kept until it fails, the failed ones are
+// remembered so they are not tried again, and the check itself is shared so a
+// batch of five items costs one health check instead of five.
+let dblpHost: string | null = null;
+let dblpHostCheck: Promise<string> | null = null;
+let dblpUserHost: string | null = null;
+const dblpFailedHosts = new Set<string>();
+let dblpPausedUntil = 0;
+
+// Takes the user host from the preferences pane. A value without a scheme gets
+// https, and a trailing slash is removed, so "dblp.example.org/" and
+// "https://dblp.example.org" mean the same thing.
+function readUserDblpHost(): string | null {
+  try {
+    const raw = Services.prefs.getStringPref(DBLP_HOST_PREF, "").trim();
+    if (!raw) return null;
+    const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    return withScheme.replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
+
+function dblpSearchURL(host: string, query: string, hits: number): string {
+  return `${host}/search/publ/api?q=${encodeURIComponent(query)}&format=json&h=${hits}&c=0`;
+}
+
+// Resolves to the host when it serves a real query as parseable DBLP JSON, and
+// fails otherwise. A host that returns its HTML error page under a 200 also
+// fails here, on the JSON parse, which is the intent.
+async function checkDblpHost(host: string): Promise<string> {
+  const response = await httpGet(
+    dblpSearchURL(host, "dblp", 1),
+    DBLP_CHECK_TIMEOUT_MS,
+  );
+  if (!JSON.parse(response.responseText).result) {
+    throw new Error(`${host} replied without a result block`);
+  }
+  return host;
+}
+
+// The user host is checked on its own first, so a working one always takes
+// precedence. The three public hosts are then checked at the same time and the
+// first to reply is kept, because any of them serves the same data and the
+// quickest one is the best pick.
+async function pickDblpHost(): Promise<string> {
+  if (dblpUserHost && !dblpFailedHosts.has(dblpUserHost)) {
+    try {
+      return await checkDblpHost(dblpUserHost);
+    } catch (e) {
+      Zotero.debug(
+        `Metadata Hunter: DBLP host ${dblpUserHost} from preferences failed its health check: ${e}`,
+      );
+      dblpFailedHosts.add(dblpUserHost);
+    }
+  }
+
+  const remaining = DBLP_HOSTS.filter((host) => !dblpFailedHosts.has(host));
+  if (remaining.length > 0) {
+    try {
+      return await Promise.any(remaining.map(checkDblpHost));
+    } catch (e) {
+      Zotero.debug(
+        `Metadata Hunter: no DBLP host passed its health check: ${e}`,
+      );
+    }
+  }
+
+  // Clear the failures so the next attempt starts from scratch, then wait.
+  dblpFailedHosts.clear();
+  dblpPausedUntil = Date.now() + DBLP_RETRY_PAUSE_MS;
+  throw new Error("no DBLP host is reachable");
+}
+
+// The host in use, choosing one when there is none.
+async function resolveDblpHost(): Promise<string> {
+  // A host typed into the preferences pane takes effect on the next lookup.
+  // Waiting for a Zotero restart would make the setting look broken.
+  const userHost = readUserDblpHost();
+  if (userHost !== dblpUserHost) {
+    dblpUserHost = userHost;
+    dblpHost = null;
+    dblpHostCheck = null;
+    dblpFailedHosts.clear();
+    dblpPausedUntil = 0;
+  }
+
+  if (dblpHost) return dblpHost;
+  if (Date.now() < dblpPausedUntil) {
+    throw new Error("DBLP is unreachable, waiting before the next attempt");
+  }
+
+  if (!dblpHostCheck) {
+    const check: Promise<string> = pickDblpHost()
+      .then((host) => {
+        // A preferences edit during the check clears dblpHostCheck. The result
+        // of a check that no longer matches the settings is then ignored.
+        if (dblpHostCheck === check) dblpHost = host;
+        return host;
+      })
+      .finally(() => {
+        if (dblpHostCheck === check) dblpHostCheck = null;
+      });
+    dblpHostCheck = check;
+  }
+  return dblpHostCheck;
+}
+
+// Every DBLP query goes through here. A host that throws is set aside for the
+// rest of the session and the query is repeated on the next candidate, so one
+// host going down costs a few seconds instead of the whole run. Setting a host
+// aside on a single failure is safe because the hosts serve the same index:
+// picking a different one has no cost, while staying on a dead one has.
+async function dblpSearch(query: string): Promise<any> {
+  for (;;) {
+    const host = await resolveDblpHost();
+    try {
+      const response = await httpGet(dblpSearchURL(host, query, 5));
+      return JSON.parse(response.responseText);
+    } catch (e) {
+      Zotero.debug(`Metadata Hunter: DBLP host ${host} failed: ${e}`);
+      dblpFailedHosts.add(host);
+      if (dblpHost === host) dblpHost = null;
+    }
+  }
+}
+
 // DBLP covers CS conference and journal papers comprehensively.
 // The `hit` field may be a single object or an array depending on result count.
 async function findDOIFromDBLP(
@@ -557,11 +715,7 @@ async function findDOIFromDBLP(
   const lastName = firstAuthorLastName(item);
   const authorSuffix = lastName ? ` ${lastName}` : "";
 
-  const q = encodeURIComponent(queryWords + authorSuffix);
-  const url = `https://dblp.org/search/publ/api?q=${q}&format=json&h=5&c=0`;
-
-  const response = await httpGet(url);
-  const data = JSON.parse(response.responseText);
+  const data = await dblpSearch(queryWords + authorSuffix);
   const rawHits = data.result?.hits?.hit;
   if (!rawHits) return null;
 
@@ -1220,11 +1374,7 @@ async function findPublishedRefFromDBLP(
   const lastName = firstAuthorLastName(item);
   const authorSuffix = lastName ? ` ${lastName}` : "";
 
-  const q = encodeURIComponent(queryWords + authorSuffix);
-  const url = `https://dblp.org/search/publ/api?q=${q}&format=json&h=5&c=0`;
-
-  const response = await httpGet(url);
-  const data = JSON.parse(response.responseText);
+  const data = await dblpSearch(queryWords + authorSuffix);
   const rawHits = data.result?.hits?.hit;
   if (!rawHits) return null;
 
