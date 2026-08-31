@@ -43,7 +43,7 @@ Open Zotero settings, then the Metadata Hunter pane.
 
 | Setting               | Meaning                                                                                                                             |
 | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Concurrent batch size | Items looked up in parallel. Higher is faster and hits the APIs harder. Default is 5.                                               |
+| Concurrent batch size | Items looked up in parallel. Higher is faster and hits the APIs harder. Default is 2.                                               |
 | DBLP server           | Optional. A DBLP of your own, used before the public ones. Leave it empty to use dblp.org, dblp.dagstuhl.de, and dblp.uni-trier.de. |
 
 DBLP runs on three separate machines that serve the same index and go down one at a time. On the first DBLP lookup of a session the plugin sends one small search request to each of them and keeps the first that replies. A server that fails later is set aside and the next one takes over, so dblp.org going down costs a few seconds instead of the whole run. When none of them replies, DBLP is skipped for a minute and the result panel names it as a failed source.

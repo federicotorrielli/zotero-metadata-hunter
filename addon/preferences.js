@@ -3,7 +3,7 @@
 (() => {
   const BATCH_PREF = "extensions.zotero.metadatahunter.batchSize";
   const DBLP_HOST_PREF = "extensions.zotero.metadatahunter.dblpHost";
-  const DEFAULT = 5;
+  const DEFAULT = 2;
   const MIN = 1;
   const MAX = 12;
 
