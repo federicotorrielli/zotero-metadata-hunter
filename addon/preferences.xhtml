@@ -2,9 +2,16 @@
       xmlns:html="http://www.w3.org/1999/xhtml"
       id="metadatahunter-preferences">
   <html:style>
+    /* Zotero paints the surface behind this pane, so every colour here has to
+       come from its theme variables. The hardcoded light values left the
+       header title and the hints too dark to make out on a dark background,
+       and put a white card around dark form controls. The names below are defined in
+       Zotero 7.0 and in current Zotero (scss/abstracts/_mixins.scss and
+       scss/themes/_dark.scss), and each declaration keeps its former light
+       value as the fallback. */
     #metadatahunter-preferences {
       box-sizing: border-box;
-      color: #20242b;
+      color: var(--fill-primary, #20242b);
       font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       padding: 8px 0 18px;
     }
@@ -26,22 +33,25 @@
       line-height: 1.2;
     }
     .mh-pref-subtitle {
-      color: #667085;
+      color: var(--fill-secondary, #667085);
       font-size: 12px;
       line-height: 1.4;
     }
     .mh-pref-section-title {
-      color: #667085;
+      color: var(--fill-secondary, #667085);
       font-size: 12px;
       font-weight: 700;
       letter-spacing: .05em;
       margin-bottom: 10px;
       text-transform: uppercase;
     }
+    /* --material-button is #fff over an #f2f2f2 pane in the light theme and
+       #404040 over a #303030 pane in the dark one, so the card stays one
+       step lighter than its background in both. */
     .mh-pref-setting {
       align-items: center;
-      background: #fff;
-      border: 1px solid rgba(0, 0, 0, .08);
+      background: var(--material-button, #fff);
+      border: var(--material-border-quinary, 1px solid rgba(0, 0, 0, .08));
       border-radius: 8px;
       display: flex;
       gap: 12px;
@@ -55,14 +65,14 @@
       min-width: 140px;
     }
     .mh-pref-number {
-      border: 1px solid rgba(0, 0, 0, .16);
+      border: var(--material-border, 1px solid rgba(0, 0, 0, .16));
       border-radius: 6px;
       font: inherit;
       padding: 6px 8px;
       width: 56px;
     }
     .mh-pref-hint {
-      color: #667085;
+      color: var(--fill-secondary, #667085);
       font-size: 12px;
       line-height: 1.45;
       margin-top: 8px;
@@ -71,7 +81,7 @@
       margin-top: 18px;
     }
     .mh-pref-text {
-      border: 1px solid rgba(0, 0, 0, .16);
+      border: var(--material-border, 1px solid rgba(0, 0, 0, .16));
       border-radius: 6px;
       flex: 1;
       font: inherit;
