@@ -580,7 +580,7 @@ const DBLP_RETRY_PAUSE_MS = 60_000;
 
 // Session state. The chosen host is kept until it fails, the failed ones are
 // remembered so they are not tried again, and the check itself is shared so a
-// batch of five items costs one health check instead of five.
+// batch costs one health check instead of one per item.
 let dblpHost: string | null = null;
 let dblpHostCheck: Promise<string> | null = null;
 let dblpUserHost: string | null = null;
@@ -987,7 +987,7 @@ interface ProcessResult {
   hadApiErrors: boolean;
 }
 
-const DEFAULT_BATCH = 5;
+const DEFAULT_BATCH = 2;
 const BATCH_PREF = `${config.prefsPrefix}.batchSize`;
 
 // Parallel items per batch, configurable (1-12) via the preferences pane.
