@@ -1,0 +1,6 @@
+# Reformatting the lockfile on every lint run produces a 3000 line diff with no
+# information about the dependencies in it.
+pnpm-lock.yaml
+# Prettier has no parser for the CSS inside <html:style> in an XHTML file, so
+# it reflows the whole stylesheet into one text block that nobody can edit.
+addon/preferences.xhtml
