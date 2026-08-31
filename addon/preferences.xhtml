@@ -67,6 +67,17 @@
       line-height: 1.45;
       margin-top: 8px;
     }
+    .mh-pref-hint + .mh-pref-setting {
+      margin-top: 18px;
+    }
+    .mh-pref-text {
+      border: 1px solid rgba(0, 0, 0, .16);
+      border-radius: 6px;
+      flex: 1;
+      font: inherit;
+      min-width: 140px;
+      padding: 6px 8px;
+    }
   </html:style>
 
   <html:div class="mh-pref-header">
@@ -84,4 +95,10 @@
     <html:input id="metadatahunter-pref-batch-number" class="mh-pref-number" type="number" min="1" max="12"/>
   </html:div>
   <html:div class="mh-pref-hint">Items processed in parallel per batch. Higher is faster but hits the metadata APIs harder. Default is 5.</html:div>
+
+  <html:div class="mh-pref-setting">
+    <html:div class="mh-pref-setting-label">DBLP server</html:div>
+    <html:input id="metadatahunter-pref-dblp-host" class="mh-pref-text" type="text" placeholder="https://dblp.example.org"/>
+  </html:div>
+  <html:div class="mh-pref-hint">Optional. A DBLP of your own, used before the public ones. Leave it empty and the plugin sends one small search request to dblp.org, dblp.dagstuhl.de, and dblp.uni-trier.de, then keeps the first that replies for the rest of the session. A server that fails later in the session is set aside and the next one takes over.</html:div>
 </vbox>

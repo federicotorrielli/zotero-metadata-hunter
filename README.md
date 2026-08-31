@@ -37,6 +37,17 @@ Shortcut: `Ctrl/Cmd + Alt + M`.
 
 For items that already exist but are missing fields, the plugin looks up the canonical record by DOI and fills the gaps in place. Missing scalar fields (venue, volume, issue, pages, ISSN, publisher, date, language, URL, series) are filled. The abstract is replaced if it is empty or under 200 characters. The author list is replaced if it has fewer than two entries or is strictly shorter than the new one and at least one surname matches. Item type is updated, so an ICML paper imported as `journalArticle` becomes `conferencePaper`. The item id, collections, citation key, and attached PDFs are kept. Preprints are skipped here; use the preprint flow instead.
 
+## Settings
+
+Open Zotero settings, then the Metadata Hunter pane.
+
+| Setting               | Meaning                                                                                                                             |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Concurrent batch size | Items looked up in parallel. Higher is faster and hits the APIs harder. Default is 5.                                               |
+| DBLP server           | Optional. A DBLP of your own, used before the public ones. Leave it empty to use dblp.org, dblp.dagstuhl.de, and dblp.uni-trier.de. |
+
+DBLP runs on three separate machines that serve the same index and go down one at a time. On the first DBLP lookup of a session the plugin sends one small search request to each of them and keeps the first that replies. A server that fails later is set aside and the next one takes over, so dblp.org going down costs a few seconds instead of the whole run. When none of them replies, DBLP is skipped for a minute and the result panel names it as a failed source.
+
 ## Failure tags
 
 Items that cannot be resolved are tagged so you can filter them in the tag pane. Tags are removed on a later successful run.

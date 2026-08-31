@@ -68,6 +68,14 @@ Outcomes are tallied through `runSource` (sequential cascades) and `trackSource`
 - `findDOIFromSemanticScholar`: uses `/paper/search/match` with title only (no author — extra terms break this endpoint's scoring); fetches `externalIds,title,abstract` so a single call can provide both DOI and abstract, skipping the abstract lookup when SS wins
 - `findDOIFromArXiv`: extracts `<arxiv:doi>` (namespace `http://arxiv.org/schemas/atom`) or `<link title="doi">` href from Atom XML
 
+**DBLP host selection** (`DBLP_HOSTS`, `checkDblpHost`, `pickDblpHost`, `resolveDblpHost`, `dblpSearch`): dblp.org, dblp.dagstuhl.de, and dblp.uni-trier.de are three separate machines serving the same index, and they go down one at a time. Neither `findDOIFromDBLP` nor `findPublishedRefFromDBLP` builds a URL any more. Both call `dblpSearch`, which resolves a host on first use, keeps it for the session, and moves to another one as soon as it throws.
+
+The health check is a real search request (`/search/publ/api?q=dblp&h=1`) whose response has to parse as JSON with a `result` block. A HEAD request on the root would not do: while this was written, `dblp.uni-trier.de` served its front page with a 200 and returned 500 for every search, so the lighter check would have selected the one host unable to serve a lookup. Checking is lazy, so a Zotero session that never runs the plugin makes no DBLP request, and the running check is shared through `dblpHostCheck`, so a batch of five items costs one check.
+
+A host that throws on a real query is added to `dblpFailedHosts` and left there for the session. Striking a host on a single failure is intentional and safe: the hosts serve the same index, so the cost of losing a healthy one is zero, while the cost of staying on a dead one is every remaining item. When nothing is left, `pickDblpHost` clears the set and sets `dblpPausedUntil` to a minute out, which keeps a library-wide run from spending one timeout per host per item on a service that is clearly down. The pause makes DBLP throw, which `runSource` and `trackSource` already record as a failed source in the result panel.
+
+`DBLP_HOST_PREF` (`extensions.zotero.metadatahunter.dblpHost`) stores an optional self-hosted DBLP. It is checked on its own before the public hosts, so a working one always takes precedence, and it falls back to them when it does not respond. `resolveDblpHost` checks the pref on every lookup and clears the cached host when the value changed, so an edit in the preferences pane takes effect without a restart.
+
 **Title matching** (`isTitleMatch`):
 
 - Normalises both strings (lowercase, strip punctuation)
