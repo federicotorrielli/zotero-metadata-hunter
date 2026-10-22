@@ -564,6 +564,9 @@ const DBLP_HOSTS = [
   "https://dblp.uni-trier.de",
 ];
 
+// The maintainer's own DBLP mirror. It is checked alone before the public hosts.
+const DEFAULT_DBLP_HOST = "https://dblp.federicotorrielli.me";
+
 // A DBLP of the user's own, set in the preferences pane. Anything that serves
 // the /search/publ/api contract fits.
 const DBLP_HOST_PREF = `${config.prefsPrefix}.dblpHost`;
@@ -619,19 +622,22 @@ async function checkDblpHost(host: string): Promise<string> {
   return host;
 }
 
-// The user host is checked on its own first, so a working one always takes
-// precedence. The three public hosts are then checked at the same time and the
-// first to reply is kept, because any of them serves the same data and the
-// quickest one is the best pick.
+// The user host and then the default host are checked one at a time, so a
+// working one always takes precedence. The three public hosts are then checked
+// at the same time and the first to reply is kept, because any of them serves
+// the same data and the quickest one is the best pick.
 async function pickDblpHost(): Promise<string> {
-  if (dblpUserHost && !dblpFailedHosts.has(dblpUserHost)) {
+  const preferred = [...new Set([dblpUserHost, DEFAULT_DBLP_HOST])].filter(
+    (host): host is string => !!host && !dblpFailedHosts.has(host),
+  );
+  for (const host of preferred) {
     try {
-      return await checkDblpHost(dblpUserHost);
+      return await checkDblpHost(host);
     } catch (e) {
       Zotero.debug(
-        `Metadata Hunter: DBLP host ${dblpUserHost} from preferences failed its health check: ${e}`,
+        `Metadata Hunter: DBLP host ${host} failed its health check: ${e}`,
       );
-      dblpFailedHosts.add(dblpUserHost);
+      dblpFailedHosts.add(host);
     }
   }
 

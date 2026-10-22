@@ -74,7 +74,7 @@ The health check is a real search request (`/search/publ/api?q=dblp&h=1`) whose 
 
 A host that throws on a real query is added to `dblpFailedHosts` and left there for the session. Striking a host on a single failure is intentional and safe: the hosts serve the same index, so the cost of losing a healthy one is zero, while the cost of staying on a dead one is every remaining item. When nothing is left, `pickDblpHost` clears the set and sets `dblpPausedUntil` to a minute out, which keeps a library-wide run from spending one timeout per host per item on a service that is clearly down. The pause makes DBLP throw, which `runSource` and `trackSource` already record as a failed source in the result panel.
 
-`DBLP_HOST_PREF` (`extensions.zotero.metadatahunter.dblpHost`) stores an optional self-hosted DBLP. It is checked on its own before the public hosts, so a working one always takes precedence, and it falls back to them when it does not respond. `resolveDblpHost` checks the pref on every lookup and clears the cached host when the value changed, so an edit in the preferences pane takes effect without a restart.
+`DBLP_HOST_PREF` (`extensions.zotero.metadatahunter.dblpHost`) stores an optional self-hosted DBLP. `DEFAULT_DBLP_HOST` (`https://dblp.federicotorrielli.me`, the maintainer's mirror) comes next. `pickDblpHost` checks the pref host and then the default host one at a time, so a working one always takes precedence, and races the public hosts only when both fail. `resolveDblpHost` checks the pref on every lookup and clears the cached host when the value changed, so an edit in the preferences pane takes effect without a restart.
 
 **Title matching** (`isTitleMatch`):
 

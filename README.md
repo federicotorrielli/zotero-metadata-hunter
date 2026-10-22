@@ -41,12 +41,12 @@ For items that already exist but are missing fields, the plugin looks up the can
 
 Open Zotero settings, then the Metadata Hunter pane.
 
-| Setting               | Meaning                                                                                                                             |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Concurrent batch size | Items looked up in parallel. Higher is faster and hits the APIs harder. Default is 2.                                               |
-| DBLP server           | Optional. A DBLP of your own, used before the public ones. Leave it empty to use dblp.org, dblp.dagstuhl.de, and dblp.uni-trier.de. |
+| Setting               | Meaning                                                                                                                                              |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Concurrent batch size | Items looked up in parallel. Higher is faster and hits the APIs harder. Default is 2.                                                                |
+| DBLP server           | Optional. A DBLP of your own, used before all the others. Leave it empty to use dblp.federicotorrielli.me, with the public DBLP servers as fallback. |
 
-DBLP runs on three separate machines that serve the same index and go down one at a time. On the first DBLP lookup of a session the plugin sends one small search request to each of them and keeps the first that replies. A server that fails later is set aside and the next one takes over, so dblp.org going down costs a few seconds instead of the whole run. When none of them replies, DBLP is skipped for a minute and the result panel names it as a failed source.
+By default the plugin queries dblp.federicotorrielli.me, a DBLP mirror kept by the maintainer. The public DBLP runs on three separate machines that serve the same index and go down one at a time. When the mirror does not reply, the plugin sends one small search request to each public server and keeps the first that replies. A server that fails later is set aside and the next one takes over, so dblp.org going down costs a few seconds instead of the whole run. When none of them replies, DBLP is skipped for a minute and the result panel names it as a failed source.
 
 ## Failure tags
 
