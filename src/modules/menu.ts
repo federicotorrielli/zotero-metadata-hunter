@@ -1,129 +1,109 @@
 import { config } from "../../package.json";
-import { getString } from "../utils/locale";
+import {
+  isEnrichable,
+  isPreprint,
+  lacksDOIOrAbstract,
+} from "../domain/preprint";
+import { ICONS } from "../utils/icons";
+import { l10nID } from "../utils/locale";
 
-declare const Zotero: any;
-
-const itemMenuListeners = new WeakMap<Window, () => void>();
-
-export function registerWindowMenus(win: Window, rootURI: string) {
-  const doc = (win as any).document;
-  const metadataIcon = rootURI + "icons/find-metadata.svg";
-  const publishedIcon = rootURI + "icons/find-published.svg";
-
-  const toolsMenu = doc.getElementById("menu_ToolsPopup");
-  if (toolsMenu) {
-    if (!doc.getElementById(`${config.addonRef}-tools-menu`)) {
-      const menuitem = doc.createXULElement("menuitem");
-      menuitem.id = `${config.addonRef}-tools-menu`;
-      menuitem.className = "menuitem-iconic";
-      menuitem.setAttribute("label", getString("menu.findDOILibrary"));
-      menuitem.setAttribute("image", metadataIcon);
-      menuitem.addEventListener("command", () =>
-        Zotero.MetadataHunter.findDOIs(),
-      );
-      toolsMenu.appendChild(menuitem);
-    }
-
-    if (!doc.getElementById(`${config.addonRef}-tools-menu-preprint`)) {
-      const menuitem = doc.createXULElement("menuitem");
-      menuitem.id = `${config.addonRef}-tools-menu-preprint`;
-      menuitem.className = "menuitem-iconic";
-      menuitem.setAttribute("label", getString("preprint.menu.library"));
-      menuitem.setAttribute("image", publishedIcon);
-      menuitem.addEventListener("command", () =>
-        Zotero.MetadataHunter.findPublishedVersions(),
-      );
-      toolsMenu.appendChild(menuitem);
-    }
-
-    if (!doc.getElementById(`${config.addonRef}-tools-menu-enrich`)) {
-      const menuitem = doc.createXULElement("menuitem");
-      menuitem.id = `${config.addonRef}-tools-menu-enrich`;
-      menuitem.className = "menuitem-iconic";
-      menuitem.setAttribute("label", getString("enrich.menu.library"));
-      menuitem.setAttribute("image", metadataIcon);
-      menuitem.addEventListener("command", () =>
-        Zotero.MetadataHunter.enrichMetadata(),
-      );
-      toolsMenu.appendChild(menuitem);
-    }
-  }
-
-  const itemMenu = doc.getElementById("zotero-itemmenu");
-  if (itemMenu) {
-    let doiItem: any = doc.getElementById(`${config.addonRef}-item-menu`);
-    if (!doiItem) {
-      doiItem = doc.createXULElement("menuitem");
-      doiItem.id = `${config.addonRef}-item-menu`;
-      doiItem.className = "menuitem-iconic";
-      doiItem.setAttribute("label", getString("menu.findDOI"));
-      doiItem.setAttribute("image", metadataIcon);
-      doiItem.addEventListener("command", () =>
-        Zotero.MetadataHunter.findDOIsForSelected(),
-      );
-      itemMenu.appendChild(doiItem);
-    }
-
-    let preprintItem: any = doc.getElementById(
-      `${config.addonRef}-item-menu-preprint`,
-    );
-    if (!preprintItem) {
-      preprintItem = doc.createXULElement("menuitem");
-      preprintItem.id = `${config.addonRef}-item-menu-preprint`;
-      preprintItem.className = "menuitem-iconic";
-      preprintItem.setAttribute("label", getString("preprint.menu.selected"));
-      preprintItem.setAttribute("image", publishedIcon);
-      preprintItem.addEventListener("command", () =>
-        Zotero.MetadataHunter.findPublishedVersionsForSelected(),
-      );
-      itemMenu.appendChild(preprintItem);
-    }
-
-    let enrichItem: any = doc.getElementById(
-      `${config.addonRef}-item-menu-enrich`,
-    );
-    if (!enrichItem) {
-      enrichItem = doc.createXULElement("menuitem");
-      enrichItem.id = `${config.addonRef}-item-menu-enrich`;
-      enrichItem.className = "menuitem-iconic";
-      enrichItem.setAttribute("label", getString("enrich.menu.selected"));
-      enrichItem.setAttribute("image", metadataIcon);
-      enrichItem.addEventListener("command", () =>
-        Zotero.MetadataHunter.enrichMetadataForSelected(),
-      );
-      itemMenu.appendChild(enrichItem);
-    }
-
-    const onShowing = () => {
-      const ZP = Zotero.getActiveZoteroPane();
-      const selected: any[] = ZP?.getSelectedItems() ?? [];
-      doiItem.hidden = !selected.some((item: any) => item.isRegularItem());
-      preprintItem.hidden = !selected.some((item: any) =>
-        Zotero.MetadataHunter.isPreprint(item),
-      );
-      enrichItem.hidden = !selected.some((item: any) =>
-        Zotero.MetadataHunter.isEnrichable(item),
-      );
-    };
-    itemMenu.addEventListener("popupshowing", onShowing);
-    itemMenuListeners.set(win, onShowing);
-  }
+export interface MenuActions {
+  findDOIs(): void;
+  findPublishedVersions(): void;
+  enrichMetadata(): void;
+  findDOIsForSelected(): void;
+  findPublishedVersionsForSelected(): void;
+  enrichMetadataForSelected(): void;
 }
 
-export function unregisterWindowMenus(win: Window) {
-  const doc = (win as any).document;
-  doc.getElementById(`${config.addonRef}-tools-menu`)?.remove();
-  doc.getElementById(`${config.addonRef}-tools-menu-preprint`)?.remove();
-  doc.getElementById(`${config.addonRef}-tools-menu-enrich`)?.remove();
-  doc.getElementById(`${config.addonRef}-item-menu`)?.remove();
-  doc.getElementById(`${config.addonRef}-item-menu-preprint`)?.remove();
-  doc.getElementById(`${config.addonRef}-item-menu-enrich`)?.remove();
+// One library-wide action, shared by the Tools menu and the toolbar dropdown.
+export interface LibraryEntry {
+  l10nKey: string;
+  icon: string;
+  run: () => void;
+}
 
-  const listener = itemMenuListeners.get(win);
-  if (listener) {
-    doc
-      .getElementById("zotero-itemmenu")
-      ?.removeEventListener("popupshowing", listener);
-    itemMenuListeners.delete(win);
-  }
+export function libraryEntries(actions: MenuActions): LibraryEntry[] {
+  return [
+    {
+      l10nKey: "menu-find-doi-library",
+      icon: ICONS.findDOI,
+      run: () => actions.findDOIs(),
+    },
+    {
+      l10nKey: "menu-preprint-library",
+      icon: ICONS.findPublished,
+      run: () => actions.findPublishedVersions(),
+    },
+    {
+      l10nKey: "menu-enrich-library",
+      icon: ICONS.enrich,
+      run: () => actions.enrichMetadata(),
+    },
+  ];
+}
+
+// A right-click entry shows only when `appliesTo` is true for a selected item.
+interface SelectionEntry extends LibraryEntry {
+  appliesTo: (item: any) => boolean;
+}
+
+function selectionEntries(actions: MenuActions): SelectionEntry[] {
+  return [
+    {
+      l10nKey: "menu-find-doi",
+      icon: ICONS.findDOI,
+      run: () => actions.findDOIsForSelected(),
+      appliesTo: lacksDOIOrAbstract,
+    },
+    {
+      l10nKey: "menu-preprint",
+      icon: ICONS.findPublished,
+      run: () => actions.findPublishedVersionsForSelected(),
+      appliesTo: isPreprint,
+    },
+    {
+      l10nKey: "menu-enrich",
+      icon: ICONS.enrich,
+      run: () => actions.enrichMetadataForSelected(),
+      appliesTo: isEnrichable,
+    },
+  ];
+}
+
+function toMenuItem({ l10nKey, icon, run }: LibraryEntry) {
+  return {
+    menuType: "menuitem",
+    l10nID: l10nID(l10nKey),
+    icon,
+    onCommand: run,
+  };
+}
+
+function toSelectionMenuItem(entry: SelectionEntry) {
+  return {
+    ...toMenuItem(entry),
+    onShowing: (_event: Event, context: any) =>
+      context.setVisible(context.items.some(entry.appliesTo)),
+  };
+}
+
+// Zotero adds the entries to every window and removes them when the plugin is disabled.
+export function registerMenus(
+  menuManager: any,
+  pluginID: string,
+  actions: MenuActions,
+): void {
+  menuManager.registerMenu({
+    menuID: `${config.addonRef}-tools`,
+    pluginID,
+    target: "main/menubar/tools",
+    menus: libraryEntries(actions).map(toMenuItem),
+  });
+  menuManager.registerMenu({
+    menuID: `${config.addonRef}-item`,
+    pluginID,
+    target: "main/library/item",
+    menus: selectionEntries(actions).map(toSelectionMenuItem),
+  });
 }

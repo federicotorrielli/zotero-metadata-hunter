@@ -1,4 +1,4 @@
-// Bootstrapped plugin entry point for Zotero 7/8
+// Bootstrapped plugin entry point for Zotero 10
 // See: https://www.zotero.org/support/dev/zotero_7_for_developers
 
 var MetadataHunter;

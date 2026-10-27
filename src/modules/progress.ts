@@ -1,8 +1,6 @@
 // Cards injected into the main Zotero window, bottom-right: a live progress
 // panel and an auto-dismissing result toast. Only one card exists at a time.
 
-declare const Zotero: any;
-
 const XHTML = "http://www.w3.org/1999/xhtml";
 const STYLE_ID = "metadatahunter-card-style";
 
@@ -19,12 +17,11 @@ export interface ProgressPanel {
 function el(
   doc: any,
   tag: string,
-  className?: string,
-  text?: string,
+  options: { className?: string; text?: string } = {},
 ): HTMLElement {
   const node = doc.createElementNS(XHTML, tag) as HTMLElement;
-  if (className) node.className = className;
-  if (text != null) node.textContent = text;
+  if (options.className) node.className = options.className;
+  if (options.text != null) node.textContent = options.text;
   return node;
 }
 
@@ -71,6 +68,12 @@ function dismiss(win: any, panel: HTMLElement): void {
   win.setTimeout(remove, EXIT_MS);
 }
 
+interface CardContent {
+  title: string;
+  body: string;
+  dismissLabel: string;
+}
+
 interface Card {
   win: any;
   doc: any;
@@ -80,24 +83,28 @@ interface Card {
 
 // Mounts the shared shell, removing any existing card first. Null when there's
 // no window to mount into.
-function createCard(title: string, body: string, variant: string): Card | null {
-  const win: any = Zotero.getMainWindow?.();
+function createCard(
+  win: any,
+  content: CardContent,
+  variant: string,
+): Card | null {
+  const { title, body, dismissLabel } = content;
   const doc: any = win?.document;
   if (!doc?.documentElement) return null;
 
   ensureStyle(doc);
   for (const old of doc.querySelectorAll(".mh-card")) old.remove();
 
-  const panel = el(doc, "div", `mh-card ${variant}`);
-  const header = el(doc, "div", "mh-card-header");
-  const copy = el(doc, "div", "mh-card-copy");
-  const bodyEl = el(doc, "div", "mh-card-body", body);
-  const closeBtn = el(doc, "button", "mh-card-close", "×");
-  closeBtn.setAttribute("aria-label", "Dismiss");
+  const panel = el(doc, "div", { className: `mh-card ${variant}` });
+  const header = el(doc, "div", { className: "mh-card-header" });
+  const copy = el(doc, "div", { className: "mh-card-copy" });
+  const bodyEl = el(doc, "div", { className: "mh-card-body", text: body });
+  const closeBtn = el(doc, "button", { className: "mh-card-close", text: "×" });
+  closeBtn.setAttribute("aria-label", dismissLabel);
 
-  copy.appendChild(el(doc, "div", "mh-card-title", title));
+  copy.appendChild(el(doc, "div", { className: "mh-card-title", text: title }));
   copy.appendChild(bodyEl);
-  header.appendChild(el(doc, "div", "mh-card-mark"));
+  header.appendChild(el(doc, "div", { className: "mh-card-mark" }));
   header.appendChild(copy);
   header.appendChild(closeBtn);
   panel.appendChild(header);
@@ -108,15 +115,12 @@ function createCard(title: string, body: string, variant: string): Card | null {
   return { win, doc, panel, bodyEl };
 }
 
-export function createProgressPanel(
-  title: string,
-  hint: string,
-): ProgressPanel {
-  const card = createCard(title, hint, "mh-card-progress");
+function createProgressPanel(win: any, content: CardContent): ProgressPanel {
+  const card = createCard(win, content, "mh-card-progress");
   if (!card) return { update() {}, close() {} };
 
-  const fill = el(card.doc, "div", "mh-progress-fill");
-  const track = el(card.doc, "div", "mh-progress-track");
+  const fill = el(card.doc, "div", { className: "mh-progress-fill" });
+  const track = el(card.doc, "div", { className: "mh-progress-track" });
   track.appendChild(fill);
   card.panel.appendChild(track);
 
@@ -132,25 +136,38 @@ export function createProgressPanel(
 
 // Non-blocking result toast. Auto-dismisses after a countdown shown as a
 // shrinking bar; hovering or focusing the card pauses it so it can be read.
-export function showResultPanel(
-  title: string,
-  message: string,
-  isError = false,
+function showResultPanel(
+  win: any,
+  content: CardContent,
+  isError: boolean,
 ): void {
-  const card = createCard(title, message, "mh-card-result");
+  const card = createCard(win, content, "mh-card-result");
   if (!card) return;
-  const { win, doc, panel } = card;
+  const { doc, panel } = card;
 
   panel.classList.add(isError ? "is-error" : "is-done");
   panel.setAttribute("role", isError ? "alert" : "status");
   panel.setAttribute("aria-live", isError ? "assertive" : "polite");
 
-  const fill = el(doc, "div", "mh-timeout-fill");
-  const track = el(doc, "div", "mh-timeout-track");
+  const fill = el(doc, "div", { className: "mh-timeout-fill" });
+  const track = el(doc, "div", { className: "mh-timeout-track" });
   track.appendChild(fill);
   panel.appendChild(track);
 
-  const duration = isError ? RESULT_TIMEOUT_ERROR : RESULT_TIMEOUT_OK;
+  startCountdown(
+    win,
+    { panel, fill },
+    isError ? RESULT_TIMEOUT_ERROR : RESULT_TIMEOUT_OK,
+  );
+}
+
+// The bar shrinks over `duration` and the card dismisses itself at zero. Hovering
+// or focusing the card pauses the countdown so the message can be read.
+function startCountdown(
+  win: any,
+  { panel, fill }: { panel: HTMLElement; fill: HTMLElement },
+  duration: number,
+): void {
   let remaining = duration;
   let last = 0;
   let paused = false;
@@ -172,4 +189,27 @@ export function showResultPanel(
   panel.addEventListener("mouseleave", () => (paused = false));
   panel.addEventListener("focusin", () => (paused = true));
   panel.addEventListener("focusout", () => (paused = false));
+}
+
+export interface CardHost {
+  createProgressPanel(title: string, hint: string): ProgressPanel;
+  showResult(title: string, message: string, isError?: boolean): void;
+}
+
+// The cards mount into whatever window `getWindow` returns at the time, which may
+// be none. `dismissLabel` is the translated accessible name of the close button.
+export function createCardHost(
+  getWindow: () => any,
+  dismissLabel: string,
+): CardHost {
+  return {
+    createProgressPanel: (title, hint) =>
+      createProgressPanel(getWindow(), { title, body: hint, dismissLabel }),
+    showResult: (title, message, isError = false) =>
+      showResultPanel(
+        getWindow(),
+        { title, body: message, dismissLabel },
+        isError,
+      ),
+  };
 }

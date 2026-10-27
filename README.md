@@ -4,7 +4,7 @@ A Zotero plugin that finds missing DOIs and abstracts, replaces preprints with t
 
 [![Latest release](https://img.shields.io/github/v/release/federicotorrielli/zotero-metadata-hunter?style=flat-square)](https://github.com/federicotorrielli/zotero-metadata-hunter/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/federicotorrielli/zotero-metadata-hunter/total?style=flat-square)](https://github.com/federicotorrielli/zotero-metadata-hunter/releases)
-[![Zotero 7 to 10](https://img.shields.io/badge/Zotero-7%20to%2010-CC2936?style=flat-square)](https://www.zotero.org/)
+[![Zotero 10](https://img.shields.io/badge/Zotero-10-CC2936?style=flat-square)](https://www.zotero.org/)
 [![License EUPL 1.2](https://img.shields.io/badge/License-EUPL%201.2-blue.svg?style=flat-square)](LICENSE)
 
 ## Install
@@ -15,11 +15,11 @@ A Zotero plugin that finds missing DOIs and abstracts, replaces preprints with t
 
 ## What it does
 
-The plugin adds three operations. Each one can be run on selected items (right-click), on a collection or library (Tools menu), or with a keyboard shortcut. Running it again while it is working cancels it.
+The plugin adds three operations. Each one can be run on selected items (right-click), on the selected collections, saved searches or libraries (Tools menu or the toolbar dropdown), or with a keyboard shortcut. The toolbar button opens a menu with the three operations, and with a Stop item while one is running. Pressing the shortcut again also stops it. Trash, feeds and other rows that should not change are never touched.
 
 ### Find DOIs and abstracts
 
-Shortcut: `Ctrl/Cmd + Alt + D`. Toolbar button.
+Shortcut: `Ctrl/Cmd + Alt + D`.
 
 DOI lookup tries CrossRef, then DBLP, then Semantic Scholar, then arXiv. Abstract lookup queries Semantic Scholar, PubMed, and OpenAlex at the same time and keeps the first result. Items that already have both fields are skipped.
 
@@ -63,12 +63,13 @@ A tag is only written when every source actually answered. If a lookup fails bec
 
 ## Development
 
-Requires Node.js 20+, pnpm, and Zotero 7, 8, 9, or 10.
+Requires Node.js 22.12 or newer, pnpm, and Zotero 10.
 
 ```bash
 pnpm install
 pnpm run build    # type-check, bundle, package the .xpi
 pnpm run lint     # prettier and eslint
+pnpm test         # unit tests, no Zotero needed
 ```
 
 There is no watch mode. To run the plugin from source, put a file named `metadatahunter@federicotorrielli.github.io` in the `extensions` directory of your [Zotero profile](https://www.zotero.org/support/kb/profile_directory), containing the absolute path to `build/addon`. Rebuild and restart Zotero to pick up changes.

@@ -1,6 +1,9 @@
 <vbox xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
       xmlns:html="http://www.w3.org/1999/xhtml"
       id="metadatahunter-preferences">
+  <linkset>
+    <html:link rel="localization" href="metadatahunter.ftl"/>
+  </linkset>
   <html:style>
     /* Zotero paints the surface behind this pane, so every colour here has to
        come from its theme variables. The hardcoded light values left the
@@ -94,21 +97,21 @@
     <html:div class="mh-pref-logo"></html:div>
     <html:div>
       <html:div class="mh-pref-title">Metadata Hunter</html:div>
-      <html:div class="mh-pref-subtitle">Find missing DOIs, abstracts, and published versions of preprints.</html:div>
+      <html:div class="mh-pref-subtitle" data-l10n-id="metadatahunter-prefs-subtitle"></html:div>
     </html:div>
   </html:div>
 
-  <html:div class="mh-pref-section-title">Settings</html:div>
+  <html:div class="mh-pref-section-title" data-l10n-id="metadatahunter-prefs-section-settings"></html:div>
   <html:div class="mh-pref-setting">
-    <html:div class="mh-pref-setting-label">Concurrent batch size</html:div>
+    <html:div class="mh-pref-setting-label" data-l10n-id="metadatahunter-prefs-batch-label"></html:div>
     <html:input id="metadatahunter-pref-batch-range" type="range" min="1" max="12"/>
     <html:input id="metadatahunter-pref-batch-number" class="mh-pref-number" type="number" min="1" max="12"/>
   </html:div>
-  <html:div class="mh-pref-hint">Items processed in parallel per batch. Higher is faster but hits the metadata APIs harder. Default is 2.</html:div>
+  <html:div class="mh-pref-hint" data-l10n-id="metadatahunter-prefs-batch-hint"></html:div>
 
   <html:div class="mh-pref-setting">
-    <html:div class="mh-pref-setting-label">DBLP server</html:div>
-    <html:input id="metadatahunter-pref-dblp-host" class="mh-pref-text" type="text" placeholder="https://dblp.example.org"/>
+    <html:div class="mh-pref-setting-label" data-l10n-id="metadatahunter-prefs-dblp-label"></html:div>
+    <html:input id="metadatahunter-pref-dblp-host" class="mh-pref-text" type="text" data-l10n-id="metadatahunter-prefs-dblp-input"/>
   </html:div>
-  <html:div class="mh-pref-hint">Optional. A DBLP of your own, used before all the others. Leave it empty and the plugin uses dblp.federicotorrielli.me. When that server does not reply, the plugin sends one small search request to dblp.org, dblp.dagstuhl.de, and dblp.uni-trier.de, then keeps the first that replies for the rest of the session. A server that fails later in the session is set aside and the next one takes over.</html:div>
+  <html:div class="mh-pref-hint" data-l10n-id="metadatahunter-prefs-dblp-hint"></html:div>
 </vbox>

@@ -1,105 +1,53 @@
-export function getString(
+import { config } from "../../package.json";
+
+declare const Zotero: any;
+
+export const FTL_FILE = `${config.addonRef}.ftl`;
+
+export type Params = Record<string, string | number>;
+
+export type Translate = (key: string, params?: Params) => string;
+
+interface Localization {
+  formatValueSync(id: string, args?: Params): string | null;
+  addResourceIds(ids: string[]): void;
+  removeResourceIds(ids: string[]): void;
+}
+
+// Fluent ids are shared by every plugin, so each one has the addon prefix.
+export const l10nID = (key: string): string => `${config.addonRef}-${key}`;
+
+// Fluent wraps arguments in bidi isolation marks, which plain text shows as boxes.
+const BIDI_ISOLATES = /[\u2068\u2069]/g;
+
+export function formatString(
+  ftl: Localization,
   key: string,
-  params?: Record<string, string | number>,
+  params?: Params,
 ): string {
-  const strings: Record<string, string> = {
-    // Shared tails. Both read the same in every flow, so they live once here
-    // and take the unit as a parameter.
-    "common.skipped":
-      "\n\n${count} ${unit} could not be checked. Not one source answered for them. They were left untagged. Run the same action again later to retry them.",
-    "common.sourceFailures":
-      "\n\nSources that failed at least once during this run: ${sources}. This is usually a rate limit. Results may be less complete than usual.",
-    "common.apiWarning":
-      "\n\nSome requests failed. The counts above may be incomplete.",
+  const text = ftl.formatValueSync(l10nID(key), params);
+  return text ? text.replace(BIDI_ISOLATES, "") : key;
+}
 
-    "toolbar.label": "Find DOIs and Abstracts",
-    "toolbar.tooltip": "Find missing DOIs and abstracts (Ctrl+Alt+D)",
-    "toolbar.cancel": "Stop",
-    "toolbar.cancel.tooltip": "Stop the run in progress",
-    "menu.findDOI": "Find DOI and Abstract",
-    "menu.findDOILibrary": "Find DOIs and Abstracts in Library",
+// The one binding to the live Zotero localization. Everything else takes it as a parameter.
+export const getString = (key: string, params?: Params): string =>
+  formatString(Zotero.ftl, key, params);
 
-    "findDOI.title": "Find DOIs and Abstracts",
-    "findDOI.allHaveData":
-      "Every item already has a DOI and an abstract. There is nothing to do.",
-    "findDOI.allSelectedHaveData":
-      "Every selected item already has a DOI and an abstract. There is nothing to do.",
-    "findDOI.noneFound":
-      "Checked ${total} item(s). No new DOIs or abstracts were found.",
-    "findDOI.foundAbstractsOnly":
-      "Checked ${total} item(s). Added ${abstracts} abstract(s). No new DOIs were found.",
-    "findDOI.foundDOIsOnly":
-      "Checked ${total} item(s). Added ${dois} DOI(s). No new abstracts were found.",
-    "findDOI.found":
-      "Checked ${total} item(s). Added ${dois} DOI(s) and ${abstracts} abstract(s).",
-    "findDOI.cancelled":
-      "Stopped after ${processed} item(s). Added ${dois} DOI(s) and ${abstracts} abstract(s).",
-    "findDOI.taggedNoDOI":
-      '\n\nNo source had a DOI for ${count} item(s). They now carry the tag "${tag}". Select that tag in the tag pane to review them.',
-    "findDOI.progress.title": "Finding DOIs and Abstracts",
-    "findDOI.progress.hint":
-      "Press Ctrl+Alt+D or click the toolbar button to stop",
-    "findDOI.progress.item":
-      "Item ${current} of ${total} (${percent}%). Found ${dois} DOIs and ${abstracts} abstracts.${eta}",
+export function registerStrings(ftl: Localization): void {
+  ftl.addResourceIds([FTL_FILE]);
+}
 
-    "preprint.menu.library": "Find Published Versions of Preprints",
-    "preprint.menu.selected": "Check for Published Version",
-    "preprint.title": "Find Published Versions",
-    "preprint.noneFound": "No preprints were found.",
-    "preprint.noneFoundSelected": "No preprints were found in the selection.",
-    "preprint.noPublished":
-      "Checked ${total} preprint(s). No published versions were found.",
-    "preprint.found":
-      "Checked ${total} preprint(s). Found a published version for ${found} of them. The new items are in your library. The preprints they replace were moved to the trash.",
-    "preprint.migratedChildren":
-      "\n\nMoved ${count} attachment(s) and note(s) onto the new items, so nothing of yours was left in the trash.",
-    "preprint.convertedToPreprint":
-      '\n\nChanged ${count} generic "document" item(s) to the "preprint" item type.',
-    "preprint.taggedNoPublished":
-      '\n\nNo published version was found for ${count} preprint(s). They now carry the tag "${tag}".',
-    "preprint.taggedFailed":
-      '\n\nA published version was found for ${count} preprint(s), but the new item could not be created from it. They now carry the tag "${tag}".',
-    "preprint.cancelled":
-      "Stopped after ${checked} preprint(s). Found ${found} published version(s).",
-    "preprint.progress.title": "Checking Preprints for Published Versions",
-    "preprint.progress.hint":
-      "Press Ctrl+Alt+P or click the toolbar button to stop",
-    "preprint.progress.item":
-      "Preprint ${current} of ${total} (${percent}%). Found ${found} published versions.${eta}",
+export function unregisterStrings(ftl: Localization): void {
+  ftl.removeResourceIds([FTL_FILE]);
+}
 
-    "enrich.menu.library": "Enrich Metadata of Library",
-    "enrich.menu.selected": "Enrich Metadata",
-    "enrich.title": "Enrich Metadata",
-    "enrich.noneEligible":
-      "No items need enrichment. Items that already have full metadata are skipped. Preprints are skipped as well, because the published version finder handles those.",
-    "enrich.noneEligibleSelected":
-      "None of the selected items can be enriched. Only regular items are eligible. Preprints are skipped, because the published version finder handles those.",
-    "enrich.noneEnriched":
-      "Checked ${total} item(s). No source held a richer record than the one already stored.",
-    "enrich.found":
-      "Checked ${total} item(s). Enriched ${enriched} of them, filling ${fields} field(s).",
-    "enrich.cancelled":
-      "Stopped after ${processed} item(s). Enriched ${enriched} of them, filling ${fields} field(s).",
-    "enrich.taggedNoDOI":
-      '\n\nNo DOI could be found for ${count} item(s). Enrichment needs a DOI to look the record up. They now carry the tag "${tag}".',
-    "enrich.taggedNoRicher":
-      '\n\nThe lookup returned nothing new for ${count} item(s). They now carry the tag "${tag}".',
-    "enrich.taggedFailed":
-      '\n\nThe lookup or the merge failed for ${count} item(s). They now carry the tag "${tag}".',
-    "enrich.progress.title": "Enriching Metadata",
-    "enrich.progress.hint":
-      "Press Ctrl+Alt+M or click the toolbar button to stop",
-    "enrich.progress.item":
-      "Item ${current} of ${total} (${percent}%). Enriched ${enriched}, filled ${fields} fields.${eta}",
-  };
+// Menu labels are resolved by the window's own l10n, so each window loads the file.
+export function loadWindowStrings(win: Window): void {
+  (win as any).MozXULElement.insertFTLIfNeeded(FTL_FILE);
+}
 
-  let str = strings[key] ?? key;
-
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      str = str.replaceAll(`\${${k}}`, String(v));
-    }
-  }
-
-  return str;
+export function unloadWindowStrings(win: Window): void {
+  (win as any).document
+    .querySelector(`link[rel="localization"][href="${FTL_FILE}"]`)
+    ?.remove();
 }

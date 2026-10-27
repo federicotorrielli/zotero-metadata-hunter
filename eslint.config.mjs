@@ -8,7 +8,7 @@ import prettier from "eslint-config-prettier";
 export default [
   { ignores: ["build/**", "node_modules/**", "addon/**"] },
   {
-    files: ["src/**/*.ts"],
+    files: ["src/**/*.ts", "tests/**/*.ts"],
     languageOptions: {
       parser: tsParser,
       parserOptions: { ecmaVersion: 2022, sourceType: "module" },
