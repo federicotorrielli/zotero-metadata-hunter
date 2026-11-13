@@ -6,6 +6,7 @@ A Zotero plugin that finds missing DOIs and abstracts, replaces preprints with t
 [![Downloads](https://img.shields.io/github/downloads/federicotorrielli/zotero-metadata-hunter/total?style=flat-square)](https://github.com/federicotorrielli/zotero-metadata-hunter/releases)
 [![Zotero 10](https://img.shields.io/badge/Zotero-10-CC2936?style=flat-square)](https://www.zotero.org/)
 [![License EUPL 1.2](https://img.shields.io/badge/License-EUPL%201.2-blue.svg?style=flat-square)](LICENSE)
+[![Zotero Plugins grade](https://zoteroplugins.org/badge/zotero-metadata-hunter.svg)](https://zoteroplugins.org/p/zotero-metadata-hunter)
 
 ## Install
 
