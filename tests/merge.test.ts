@@ -156,6 +156,18 @@ describe("enrichItemFromMetadata", () => {
     expect(kept.fields.abstractNote).toBe(long);
   });
 
+  it("joins the lines of an indented CrossRef abstract", () => {
+    const item = makeItem();
+    const abstractNote =
+      "SUMMARY\n            \n              Borneol is made\n              in vitro\n              .";
+    enrichItemFromMetadata(
+      env(),
+      item,
+      record({ itemType: "journalArticle", fields: { abstractNote } }),
+    );
+    expect(item.fields.abstractNote).toBe("SUMMARY Borneol is made in vitro .");
+  });
+
   it("does not replace a short abstract with a shorter one", () => {
     const item = makeItem({ fields: { abstractNote: "Medium length." } });
     enrichItemFromMetadata(

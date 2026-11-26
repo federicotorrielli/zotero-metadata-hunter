@@ -1,3 +1,4 @@
+import { cleanAbstract } from "../domain/merge";
 import { isPublishedDOI, isPublishedVenue } from "../domain/preprint";
 import { cleanTitleForQuery, isTitleMatch } from "../match/title";
 import type { Http } from "../net/http";
@@ -27,7 +28,11 @@ export async function findDOI(
 ): Promise<DOIResult | null> {
   const paper = await matchTitle(http, title, "externalIds,title,abstract");
   const doi = paper?.externalIds?.DOI;
-  return doi ? { doi, abstract: paper.abstract ?? null } : null;
+  if (!doi) return null;
+  return {
+    doi,
+    abstract: cleanAbstract(paper.abstract ?? "") || null,
+  };
 }
 
 function venueOf(paper: any): string {
@@ -60,5 +65,5 @@ export async function findAbstract(
   const data = await http.getOptionalJson(
     `${API}/paper/DOI:${doi}?fields=abstract`,
   );
-  return data?.abstract ?? null;
+  return cleanAbstract(data?.abstract ?? "") || null;
 }

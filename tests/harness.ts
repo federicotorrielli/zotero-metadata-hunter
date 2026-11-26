@@ -36,7 +36,7 @@ export const instantClock = (): Clock => {
 };
 
 export interface FakeApi extends ZoteroApi {
-  erased: number[];
+  lookedUp: string[];
   created: { kind: string; arg: string; collections: number[] }[];
   store: Map<number, ZoteroItem>;
   // The state answered for an attachment id. Unlisted ids are healthy.
@@ -46,7 +46,7 @@ export interface FakeApi extends ZoteroApi {
 
 export function fakeApi(): FakeApi {
   const api: FakeApi = {
-    erased: [],
+    lookedUp: [],
     created: [],
     store: new Map(),
     attachmentStates: new Map(),
@@ -57,7 +57,19 @@ export function fakeApi(): FakeApi {
     getItem: async (id) => api.store.get(id) ?? null,
     attachmentState: async (item) =>
       api.attachmentStates.get(item.id) ?? "healthy",
-    eraseItem: async (id) => void api.erased.push(id),
+    // Answers from the same fake item as fromDOI, as a plain record.
+    lookupDOI: async (doi) => {
+      api.lookedUp.push(doi);
+      const item = api.next.doi;
+      if (item instanceof Error) throw item;
+      return (
+        item && {
+          itemType: item.itemType,
+          fields: { ...(item as FakeItem).fields },
+          creators: item.getCreators(),
+        }
+      );
+    },
     fromDOI: (doi, target) => answer("doi", doi, target.collections),
     fromURL: (url, target) => answer("url", url, target.collections),
     fromBibtex: (text, target) => answer("bibtex", text, target.collections),

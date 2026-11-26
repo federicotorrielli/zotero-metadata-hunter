@@ -1,6 +1,8 @@
 // The slice of Zotero's objects this plugin uses. Zotero has no types of its own, so
 // each interface lists only what the code calls, which keeps test doubles small.
 
+import type { NormalizedRecord } from "./domain/merge";
+
 export interface Creator {
   firstName?: string;
   lastName?: string;
@@ -82,7 +84,9 @@ export interface ZoteroApi {
   isFieldValidForType(field: string, itemTypeID: number): boolean;
   getItem(id: number): Promise<ZoteroItem | null>;
   attachmentState(item: ZoteroItem): Promise<AttachmentState>;
-  eraseItem(id: number): Promise<void>;
+  // Looks a DOI up through the translators and saves nothing. Resolves to null
+  // when no translator or no result is available.
+  lookupDOI(doi: string): Promise<NormalizedRecord | null>;
   // Each translator call saves the new item to the library. All three resolve to
   // null when no translator or no result is available.
   fromDOI(doi: string, target: TranslateTarget): Promise<ZoteroItem | null>;

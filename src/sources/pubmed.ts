@@ -1,3 +1,4 @@
+import { cleanAbstract } from "../domain/merge";
 import type { SourceDeps } from "./deps";
 
 const EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
@@ -8,7 +9,7 @@ const EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 function joinSections(xml: Document): string | null {
   const sections = [...xml.querySelectorAll("Abstract > AbstractText")]
     .map((node) => {
-      const text = node.textContent?.trim() ?? "";
+      const text = cleanAbstract(node.textContent ?? "");
       const label = node.getAttribute("Label");
       return label && text ? `${label}: ${text}` : text;
     })

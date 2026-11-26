@@ -46,6 +46,12 @@ export interface MergeEnv {
 
 const trimmed = (value: string | undefined): string => (value ?? "").trim();
 
+// CrossRef serves abstracts as indented JATS XML, and other sources hard-wrap
+// theirs. Both leave line breaks in the middle of sentences, so every run of
+// whitespace becomes one space.
+export const cleanAbstract = (text: string): string =>
+  text.replace(/\s+/g, " ").trim();
+
 // The hydrated list has to be longer, because an equal or shorter one adds
 // nothing and would only rewrite names the user may have corrected. Then replace
 // when the existing list is truncated (fewer than two creators), or when it shares
@@ -115,7 +121,7 @@ function mergeDate(item: ZoteroItem, record: NormalizedRecord): string[] {
 }
 
 function mergeAbstract(item: ZoteroItem, record: NormalizedRecord): string[] {
-  const incoming = trimmed(record.fields.abstractNote);
+  const incoming = cleanAbstract(record.fields.abstractNote ?? "");
   const existing = trimmed(item.getField("abstractNote"));
   const replaces =
     !existing ||

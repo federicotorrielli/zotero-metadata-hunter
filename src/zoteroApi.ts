@@ -1,5 +1,7 @@
+import { SNAPSHOT_FIELDS, type NormalizedRecord } from "./domain/merge";
 import type {
   AttachmentState,
+  Creator,
   TranslateTarget,
   ZoteroApi,
   ZoteroItem,
@@ -21,14 +23,67 @@ const translateOptions = ({ libraryID, collections }: TranslateTarget) => ({
 async function translateDOI(
   zotero: any,
   doi: string,
-  target: TranslateTarget,
-): Promise<ZoteroItem[] | undefined> {
+  options: object,
+): Promise<any[] | undefined> {
   const translate = new zotero.Translate.Search();
   translate.setIdentifier({ DOI: doi });
   const translators = await translate.getTranslators();
   if (!translators.length) return undefined;
   translate.setTranslator(translators);
-  return translate.translate(translateOptions(target));
+  return translate.translate(options);
+}
+
+// Zotero cleans translator creators when it saves an item, and nothing is saved
+// here. `setCreators` throws on an entry without a type or without a string
+// last name, after it has already overwritten the entries before it. So every
+// entry is made valid here, and one with no name at all is dropped.
+function toCreator(raw: any): Creator | null {
+  const text = (value: unknown) =>
+    typeof value === "string" ? value.trim() : "";
+  const first = text(raw.firstName);
+  const last = text(raw.lastName) || text(raw.name);
+  if (!first && !last) return null;
+  const creatorType = text(raw.creatorType) || "author";
+  // A single-field name: an institution, or a person with only a given name,
+  // which Zotero rejects in two-field form.
+  if (!last || raw.fieldMode === 1) {
+    const lastName = [first, last].filter(Boolean).join(" ");
+    return { firstName: "", lastName, fieldMode: 1, creatorType };
+  }
+  return { firstName: first, lastName: last, creatorType };
+}
+
+// A translator may use the base name of a field (publicationTitle) where the
+// item type has its own (proceedingsTitle). Zotero maps these when it saves an
+// item, and nothing is saved here, so the mapping is done by hand.
+function toRecord(zotero: any, json: any): NormalizedRecord | null {
+  const typeID = zotero.ItemTypes.getID(json.itemType);
+  if (!typeID) return null;
+  const fields: Record<string, string> = {};
+  for (const name of SNAPSHOT_FIELDS) {
+    const value = String(json[name] ?? "").trim();
+    const fieldID =
+      value && zotero.ItemFields.getFieldIDFromTypeAndBase(typeID, name);
+    if (fieldID) fields[zotero.ItemFields.getName(fieldID)] = value;
+  }
+  const creators = (json.creators ?? [])
+    .map(toCreator)
+    .filter((creator: Creator | null) => creator !== null);
+  return { itemType: json.itemType, fields, creators };
+}
+
+// `libraryID: false` makes the translator return plain item JSON and save
+// nothing. No item is added to the library, so no notifier event fires and no
+// other plugin sees a duplicate of the item being enriched.
+async function lookupDOI(
+  zotero: any,
+  doi: string,
+): Promise<NormalizedRecord | null> {
+  const found = await translateDOI(zotero, doi, {
+    libraryID: false,
+    saveAttachments: false,
+  });
+  return found?.[0] ? toRecord(zotero, found[0]) : null;
 }
 
 // The web translator, like dragging a URL into Zotero. It handles venues such as
@@ -98,7 +153,7 @@ async function classifyAttachment(
 }
 
 // The only place that talks to Zotero's translators and item registries. The
-// translators save what they create, so every method here returns the saved item.
+// `from*` methods save what the translator creates and return the saved item.
 export function createZoteroApi(
   zotero: any,
   io: FileSystem,
@@ -127,9 +182,11 @@ export function createZoteroApi(
     },
     getItem: async (id) => (await zotero.Items.getAsync(id)) || null,
     attachmentState: (item) => classifyAttachment(zotero, io, item),
-    eraseItem: (id) => zotero.Items.erase(id),
+    lookupDOI: (doi) => lookupDOI(zotero, doi),
     fromDOI: (doi, target) =>
-      attempt(`DOI ${doi}`, () => translateDOI(zotero, doi, target)),
+      attempt(`DOI ${doi}`, () =>
+        translateDOI(zotero, doi, translateOptions(target)),
+      ),
     fromURL: (url, target) =>
       attempt(`URL ${url}`, () => translateURL(zotero, url, target)),
     fromBibtex: (bibtex, target) =>

@@ -23,7 +23,7 @@ function fakeZotero(over: Record<string, any> = {}) {
     setDocument = vi.fn();
     getTranslators = async () => this.translators;
     setTranslator = (t: unknown) => calls.translator.push(t);
-    translate = async (options: unknown) => {
+    translate = async (options: unknown): Promise<any[]> => {
       calls.translate.push(options);
       return [{ id: 42 }];
     };
@@ -32,16 +32,24 @@ function fakeZotero(over: Record<string, any> = {}) {
     calls,
     zotero: {
       ItemTypes: {
-        getID: (n: string) => (n === "preprint" ? 3 : false),
+        getID: (n: string) => ({ preprint: 3, conferencePaper: 4 })[n] ?? false,
         getName: (id: number) => (id === 3 ? "preprint" : undefined),
       },
       ItemFields: {
         getID: (n: string) => (n === "title" ? 1 : false),
         isValidForType: (_f: number, type: number) => type === 3,
+        // publicationTitle is the only base name with a type specific field.
+        // Like Zotero: throws without a type, false for a field the type lacks.
+        // Here the fake type lacks ISSN.
+        getFieldIDFromTypeAndBase: (type: number | false, n: string) => {
+          if (!type) throw new Error(`Invalid item type '${type}'`);
+          if (n === "ISSN") return false;
+          return n === "publicationTitle" ? "proceedingsTitle" : n;
+        },
+        getName: (id: string) => id,
       },
       Items: {
         getAsync: async (id: number) => (id === 1 ? { id } : false),
-        erase: vi.fn(async () => {}),
       },
       Translate: { Search: Translator, Import: Translator, Web: Translator },
       Attachments: { LINK_MODE_LINKED_URL: 3, LINK_MODE_LINKED_FILE: 2 },
@@ -75,13 +83,71 @@ describe("createZoteroApi", () => {
     expect(api.isFieldValidForType("unknown", 3)).toBe(false);
   });
 
-  it("gets and erases items", async () => {
-    const { zotero } = fakeZotero();
-    const api = createZoteroApi(zotero, files(), log);
+  it("gets items", async () => {
+    const api = createZoteroApi(fakeZotero().zotero, files(), log);
     expect(await api.getItem(1)).toEqual({ id: 1 });
     expect(await api.getItem(2)).toBeNull();
-    await api.eraseItem(5);
-    expect(zotero.Items.erase).toHaveBeenCalledWith(5);
+  });
+
+  it("looks a DOI up without saving and maps base field names", async () => {
+    const { zotero, calls } = fakeZotero();
+    const creators = [
+      { firstName: "Ashish", lastName: "Vaswani", creatorType: "editor" },
+      { firstName: "Jane", lastName: null },
+      { lastName: "Google", fieldMode: 1, creatorType: "author" },
+      { creatorType: "author" },
+    ];
+    zotero.Translate.Search = class extends zotero.Translate.Search {
+      translate = async (options: unknown) => {
+        calls.translate.push(options);
+        return [
+          {
+            itemType: "conferencePaper",
+            publicationTitle: "NeurIPS",
+            volume: 30,
+            ISSN: "1234-5678",
+            pages: " ",
+            creators,
+          },
+        ];
+      };
+    };
+    const record = await createZoteroApi(zotero, files(), log).lookupDOI(
+      "10.1/x",
+    );
+    expect(calls.translate[0]).toEqual({
+      libraryID: false,
+      saveAttachments: false,
+    });
+    expect(record).toEqual({
+      itemType: "conferencePaper",
+      fields: { proceedingsTitle: "NeurIPS", volume: "30" },
+      creators: [
+        { firstName: "Ashish", lastName: "Vaswani", creatorType: "editor" },
+        {
+          firstName: "",
+          lastName: "Jane",
+          fieldMode: 1,
+          creatorType: "author",
+        },
+        {
+          firstName: "",
+          lastName: "Google",
+          fieldMode: 1,
+          creatorType: "author",
+        },
+      ],
+    });
+  });
+
+  it("answers null for a record of an unknown item type", async () => {
+    const { zotero } = fakeZotero();
+    zotero.Translate.Search = class extends zotero.Translate.Search {
+      translate = async () => [{ itemType: "hologram", title: "T" }];
+    };
+    expect(
+      await createZoteroApi(zotero, files(), log).lookupDOI("10.1/x"),
+    ).toBeNull();
   });
 
   it("creates from a DOI in the target library without attachments", async () => {

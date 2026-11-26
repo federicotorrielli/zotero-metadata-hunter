@@ -1,13 +1,9 @@
 import { getDOI, isEnrichable, isPublishedDOI } from "../domain/preprint";
-import {
-  enrichItemFromMetadata,
-  SNAPSHOT_FIELDS,
-  type NormalizedRecord,
-} from "../domain/merge";
-import type { ZoteroApi, ZoteroItem } from "../types";
+import { enrichItemFromMetadata, type NormalizedRecord } from "../domain/merge";
+import type { ZoteroItem } from "../types";
 import type { Params, Translate } from "../utils/locale";
 import type { Action, Scope } from "./action";
-import { findDOIForItem } from "./doi";
+import { findAbstractForItem, findDOIForItem } from "./doi";
 import { findPublishedDOI } from "./preprints";
 import {
   appendNotes,
@@ -38,69 +34,21 @@ export function hasSparseMetadata(item: ZoteroItem): boolean {
 export const analyzeItemsForEnrichment = (items: ZoteroItem[]): ZoteroItem[] =>
   items.filter((item) => isEnrichable(item) && hasSparseMetadata(item));
 
-// Snapshots the hydrated item into a plain object. It runs against the live
-// scratch, before the erase in fetchRichRecordByDOI, so the record survives the
-// scratch's deletion.
-export function normalizeScratch(
-  api: ZoteroApi,
-  scratch: ZoteroItem,
-): NormalizedRecord {
-  const fields: Record<string, string> = {};
-  for (const name of SNAPSHOT_FIELDS) {
-    if (!api.isFieldValidForType(name, scratch.itemTypeID)) continue;
-    const value = scratch.getField(name);
-    if (value != null && String(value).trim()) fields[name] = String(value);
-  }
-  return {
-    itemType: api.itemTypeName(scratch.itemTypeID),
-    fields,
-    creators: (scratch.getCreators() ?? []).map((creator) => ({ ...creator })),
-  };
-}
-
 // Looks the DOI up through Zotero's translators, the machinery behind "Add Item
-// by Identifier", and returns a plain record.
-//
-// The translator saves what it creates, and the enrichment must not leave a
-// duplicate in the library. So the scratch is created outside any collection,
-// snapshotted into a plain record while it is alive, and erased in `finally`.
-// The order is load bearing in two ways. `return normalizeScratch(...)` is
-// evaluated before `finally` runs, so the snapshot is taken from the live item.
-// And the erase finishes before this function returns, so the duplicate never
-// reaches the user. The erase is not silent: the translator sent an `add` event,
-// and the matching `delete` has to fire too, or the item list keeps a stale row.
+// by Identifier", and returns a plain record. The lookup saves nothing to the
+// library. An earlier version saved a scratch item and erased it, and plugins
+// that watch for new items reported that scratch as a duplicate.
 export async function fetchRichRecordByDOI(
   deps: FlowDeps,
   doi: string,
-  source: ZoteroItem,
 ): Promise<NormalizedRecord | null> {
-  let scratch: ZoteroItem | null = null;
   try {
-    scratch = await deps.api.fromDOI(doi, {
-      libraryID: source.libraryID,
-      collections: [],
-    });
-    return scratch && normalizeScratch(deps.api, scratch);
+    return await deps.api.lookupDOI(doi);
   } catch (error) {
     deps.log(
       `Metadata Hunter: Failed to fetch rich record for DOI ${doi}: ${error}`,
     );
     return null;
-  } finally {
-    if (scratch) await eraseScratch(deps, scratch);
-  }
-}
-
-async function eraseScratch(
-  deps: FlowDeps,
-  scratch: ZoteroItem,
-): Promise<void> {
-  try {
-    await deps.api.eraseItem(scratch.id);
-  } catch (error) {
-    deps.log(
-      `Metadata Hunter: Failed to erase scratch item ${scratch.id}: ${error}`,
-    );
   }
 }
 
@@ -182,7 +130,7 @@ async function mergeRichRecord(
   item: ZoteroItem,
   doi: string,
 ): Promise<EnrichOutcome> {
-  const record = await fetchRichRecordByDOI(deps, doi, item);
+  const record = await fetchRichRecordByDOI(deps, doi);
   if (!record) {
     await setFailureTag(item, TAG_UPDATE_FAILED, deps.log);
     return { failed: true };
@@ -200,6 +148,13 @@ async function mergeRichRecord(
     item,
     record,
   );
+  // CrossRef holds no abstract for many publishers (Elsevier among them), so
+  // an item still without one asks the abstract sources.
+  const abstract = await findAbstractForItem(deps, item, doi);
+  if (abstract) {
+    item.setField("abstractNote", abstract);
+    changed.push("abstractNote");
+  }
   if (changed.length > 0) {
     removeFailureTags(item, [TAG_NO_RICHER_RECORD, TAG_UPDATE_FAILED]);
     await item.saveTx();

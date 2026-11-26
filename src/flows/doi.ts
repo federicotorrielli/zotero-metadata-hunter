@@ -80,7 +80,7 @@ export async function findAbstractForItem(
   if (item.getField("abstractNote")?.trim()) return null;
   const tally = new SourceTally(deps.log);
   try {
-    return await Promise.any(
+    const found = await Promise.any(
       deps.lookups.abstracts.map(({ name, find }) =>
         withNullAsReject(
           tally.track(
@@ -90,6 +90,8 @@ export async function findAbstractForItem(
         ),
       ),
     );
+    // The lookup takes seconds. An abstract the user saved meanwhile is kept.
+    return item.getField("abstractNote")?.trim() ? null : found;
   } catch {
     return null;
   }
