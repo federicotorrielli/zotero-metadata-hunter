@@ -6,6 +6,7 @@ import { createDOIAction } from "./flows/doi";
 import { createEnrichAction } from "./flows/enrich";
 import { createPreprintAction } from "./flows/preprints";
 import type { FlowDeps, RunStats } from "./flows/shared";
+import { registerAbstractColumn } from "./modules/column";
 import {
   libraryEntries,
   registerMenus,
@@ -196,6 +197,11 @@ Zotero.MetadataHunter = {
     Object.assign(Zotero.MetadataHunter, plugin.actions);
     registerMenus(Zotero.MenuManager, data.id, plugin.actions);
     registerPreferencePane(data.id, data.rootURI);
+    registerAbstractColumn(
+      Zotero.ItemTreeManager,
+      data.id,
+      getString("column-has-abstract"),
+    );
     for (const win of Zotero.getMainWindows()) {
       Zotero.MetadataHunter.onMainWindowLoad(win);
     }

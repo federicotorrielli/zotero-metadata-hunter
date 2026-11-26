@@ -46,6 +46,10 @@ metadatahunter-toolbar-tooltip = Find DOIs, published versions of preprints, and
 metadatahunter-toolbar-cancel = Stop
 metadatahunter-toolbar-cancel-tooltip = Stop the run in progress
 
+## Item list column
+
+metadatahunter-column-has-abstract = Abstract?
+
 ## Menus. These carry only a label, because MenuManager sets it as an attribute.
 
 metadatahunter-menu-find-doi-library =

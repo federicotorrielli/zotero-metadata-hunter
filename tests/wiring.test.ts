@@ -11,6 +11,7 @@ function setup() {
       t(id.replace("metadatahunter-", ""), args),
   };
   const registerMenu = vi.fn();
+  const registerColumn = vi.fn();
   const register = vi.fn();
   const insertFTLIfNeeded = vi.fn();
   (document as any).createXULElement = (tag: string) =>
@@ -30,6 +31,7 @@ function setup() {
     debug: vi.fn(),
     ftl,
     MenuManager: { registerMenu },
+    ItemTreeManager: { registerColumn },
     PreferencePanes: { register },
     getMainWindows: () => [window],
     getMainWindow: () => window,
@@ -39,7 +41,14 @@ function setup() {
     }),
     HTTP: { request: vi.fn() },
   };
-  return { ftl, registerMenu, register, insertFTLIfNeeded, toolbar };
+  return {
+    ftl,
+    registerMenu,
+    registerColumn,
+    register,
+    insertFTLIfNeeded,
+    toolbar,
+  };
 }
 
 describe("plugin lifecycle", () => {
@@ -58,6 +67,9 @@ describe("plugin lifecycle", () => {
 
     expect(env.ftl.addResourceIds).toHaveBeenCalledWith(["metadatahunter.ftl"]);
     expect(env.registerMenu).toHaveBeenCalledTimes(2);
+    expect(env.registerColumn).toHaveBeenCalledWith(
+      expect.objectContaining({ label: "Abstract?", pluginID: "id@x" }),
+    );
     expect(env.registerMenu.mock.calls[0][0].pluginID).toBe("id@x");
     expect(env.register).toHaveBeenCalledWith(
       expect.objectContaining({

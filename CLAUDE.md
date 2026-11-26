@@ -101,6 +101,7 @@ The preference `extensions.zotero.metadatahunter.dblpHost` (`DBLP_HOST_PREF` in 
 - `modules/toolbar.ts`: the toolbar button is a dropdown with the three library-wide actions (`libraryEntries` in `menu.ts`, shared with the Tools menu), or a single Stop item while a run is active. It receives `isProcessing` and `stop` as `ToolbarDeps` and reads no module state.
 - `modules/shortcuts.ts`: Ctrl or Cmd plus Alt plus D, P or M. Each key toggles through `RunController.toggle`: start when idle, cancel when running.
 - `modules/progress.ts`: the progress and result cards, mounted into the window the host is given.
+- `modules/column.ts`: an optional "Abstract?" column for the item list, registered once at startup through `Zotero.ItemTreeManager.registerColumn`. It shows a check mark for a regular item with an abstract. Zotero removes it when the plugin is disabled.
 
 ## Testing
 
