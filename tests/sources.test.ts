@@ -76,13 +76,20 @@ describe("semanticScholar", () => {
   it("returns the DOI with the bundled abstract", async () => {
     const http = fakeHttp({
       "search/match": {
-        data: [{ title, externalIds: { DOI: "10.1/s" }, abstract: "Abs" }],
+        data: [
+          { title, externalIds: { DOI: "10.1/s" }, abstract: "Abs\n  tract" },
+        ],
       },
     });
     expect(await semanticScholar.findDOI(http, title)).toEqual({
       doi: "10.1/s",
-      abstract: "Abs",
+      abstract: "Abs tract",
     });
+  });
+
+  it("reads a blank abstract as none", async () => {
+    const http = fakeHttp({ "paper/DOI": { abstract: " \n " } });
+    expect(await semanticScholar.findAbstract(http, "10.1/s")).toBeNull();
   });
 
   it("reads a 404 as no record", async () => {
@@ -224,11 +231,12 @@ describe("pubmed", () => {
       esearch: search,
       efetch: `<PubmedArticleSet><PubmedArticle><Article><Abstract>
         <AbstractText Label="BACKGROUND">Why.</AbstractText>
-        <AbstractText Label="METHODS">How.</AbstractText>
+        <AbstractText Label="METHODS">How
+          it works.</AbstractText>
         </Abstract></Article></PubmedArticle></PubmedArticleSet>`,
     });
     expect(await pubmed.findAbstract(deps, "10.1/p")).toBe(
-      "BACKGROUND: Why.\nMETHODS: How.",
+      "BACKGROUND: Why.\nMETHODS: How it works.",
     );
   });
 

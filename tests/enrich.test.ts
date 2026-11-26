@@ -5,7 +5,6 @@ import {
   enrichItemMetadata,
   fetchRichRecordByDOI,
   hasSparseMetadata,
-  normalizeScratch,
 } from "../src/flows/enrich";
 import {
   TAG_NO_DOI,
@@ -72,62 +71,57 @@ describe("hasSparseMetadata", () => {
   });
 });
 
-describe("normalizeScratch and fetchRichRecordByDOI", () => {
-  it("snapshots the type, the valid non-empty fields and the creators", () => {
-    const h = makeHarness();
-    const record = normalizeScratch(h.api, hydrated());
-    expect(record.itemType).toBe("conferencePaper");
-    expect(record.fields).toMatchObject({ pages: "1-11", volume: "30" });
-    expect(record.fields.ISSN).toBeUndefined();
-    expect(record.creators).toHaveLength(2);
-  });
-
-  it("erases the scratch item after taking the snapshot", async () => {
+describe("fetchRichRecordByDOI", () => {
+  it("returns the record and creates no item", async () => {
     const h = makeHarness();
     h.api.next.doi = hydrated();
-    const record = await fetchRichRecordByDOI(h.deps, "10.1/real", sparse());
+    const record = await fetchRichRecordByDOI(h.deps, "10.1/real");
     expect(record?.fields.pages).toBe("1-11");
-    expect(h.api.erased).toEqual([500]);
-    expect(h.api.created[0].collections).toEqual([]);
+    expect(h.api.created).toEqual([]);
   });
 
-  it("erases the scratch even when the snapshot fails", async () => {
+  it("returns null when nothing came back", async () => {
     const h = makeHarness();
-    const scratch = hydrated();
-    scratch.getCreators = () => {
-      throw new Error("boom");
-    };
-    h.api.next.doi = scratch;
-    expect(
-      await fetchRichRecordByDOI(h.deps, "10.1/real", sparse()),
-    ).toBeNull();
-    expect(h.api.erased).toEqual([500]);
+    expect(await fetchRichRecordByDOI(h.deps, "10.1/real")).toBeNull();
   });
 
-  it("returns null and erases nothing when no item came back", async () => {
+  it("logs a failed lookup and returns null", async () => {
     const h = makeHarness();
-    expect(
-      await fetchRichRecordByDOI(h.deps, "10.1/real", sparse()),
-    ).toBeNull();
-    expect(h.api.erased).toEqual([]);
-  });
-
-  it("logs a failed erase and still returns the record", async () => {
-    const h = makeHarness();
-    h.api.next.doi = hydrated();
-    h.api.eraseItem = async () => {
-      throw new Error("locked");
-    };
-    expect(
-      await fetchRichRecordByDOI(h.deps, "10.1/real", sparse()),
-    ).not.toBeNull();
-    expect(h.logs.some((m) => m.includes("Failed to erase scratch"))).toBe(
-      true,
-    );
+    h.api.next.doi = new Error("network");
+    expect(await fetchRichRecordByDOI(h.deps, "10.1/real")).toBeNull();
+    expect(h.logs[0]).toContain("Failed to fetch rich record");
   });
 });
 
 describe("enrichItemMetadata", () => {
+  it("keeps an abstract the user saved while the lookup ran", async () => {
+    const h = makeHarness();
+    h.api.next.doi = hydrated({ fields: { title, pages: "1-11" } });
+    const item = sparse();
+    h.lookups.abstracts = [
+      {
+        name: "PubMed",
+        find: async () => {
+          item.setField("abstractNote", "Typed by the user.");
+          return "From PubMed.";
+        },
+      },
+    ];
+    const outcome = await enrichItemMetadata(h.deps, item);
+    expect(item.fields.abstractNote).toBe("Typed by the user.");
+    expect(outcome.changed).not.toContain("abstractNote");
+  });
+
+  it("asks the abstract sources when the record has no abstract", async () => {
+    const h = makeHarness();
+    h.api.next.doi = hydrated({ fields: { title, pages: "1-11" } });
+    h.lookups.abstracts = [doiSource("PubMed", "From PubMed.")];
+    const item = sparse();
+    const outcome = await enrichItemMetadata(h.deps, item);
+    expect(item.fields.abstractNote).toBe("From PubMed.");
+    expect(outcome.changed).toContain("abstractNote");
+  });
+
   it("merges the record and saves the item once", async () => {
     const h = makeHarness();
     h.api.next.doi = hydrated();
@@ -186,7 +180,7 @@ describe("enrichItemMetadata", () => {
     await enrichItemMetadata(h.deps, item);
     expect(item.fields.DOI).toBe("10.1/new");
     expect(item.hasTag(TAG_NO_DOI)).toBe(false);
-    expect(h.api.created[0].arg).toBe("10.1/new");
+    expect(h.api.lookedUp[0]).toBe("10.1/new");
   });
 
   it("tags an item no source has a DOI for, and leaves an unchecked one alone", async () => {
@@ -215,7 +209,7 @@ describe("enrichItemMetadata", () => {
     });
     const outcome = await enrichItemMetadata(h.deps, item);
     expect(outcome.changed).toEqual([]);
-    expect(h.api.created).toEqual([]);
+    expect(h.api.lookedUp).toEqual([]);
     expect(item.hasTag(TAG_NO_RICHER_RECORD)).toBe(true);
   });
 
@@ -228,7 +222,7 @@ describe("enrichItemMetadata", () => {
     });
     await enrichItemMetadata(h.deps, item);
     expect(item.fields.DOI).toBe("10.1/pub");
-    expect(h.api.created[0].arg).toBe("10.1/pub");
+    expect(h.api.lookedUp[0]).toBe("10.1/pub");
   });
 
   it("skips items that are not enrichable", async () => {
