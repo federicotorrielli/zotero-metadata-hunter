@@ -26,6 +26,7 @@ metadatahunter-common-skipped-preprints = { $count ->
 metadatahunter-common-source-failures = Sources that failed at least once during this run: { $sources }. This is usually a rate limit. Results may be less complete than usual.
 metadatahunter-common-run-failed = The run stopped because of an error: { $error }
 metadatahunter-common-api-warning = Some requests failed. The counts above may be incomplete.
+metadatahunter-common-s2-key-invalid = Semantic Scholar did not accept the API key set in the Metadata Hunter settings. Check the key there. Leave the field empty to go back to the shared access without a key.
 
 metadatahunter-eta-seconds = About { $count ->
     [one] 1 second
@@ -240,3 +241,7 @@ metadatahunter-prefs-dblp-label = DBLP server
 metadatahunter-prefs-dblp-input =
     .placeholder = https://dblp.example.org
 metadatahunter-prefs-dblp-hint = Optional. A DBLP of your own, used before all the others. Leave it empty and the plugin uses dblp.federicotorrielli.me. When that server does not reply, the plugin sends one small search request to dblp.org, dblp.dagstuhl.de, and dblp.uni-trier.de, then keeps the first that replies for the rest of the session. A server that fails later in the session is set aside and the next one takes over.
+metadatahunter-prefs-s2-label = Semantic Scholar API key
+metadatahunter-prefs-s2-input =
+    .placeholder = Optional
+metadatahunter-prefs-s2-hint = Optional. A free personal key from semanticscholar.org/product/api. Without a key, every request shares one rate limit with all other users of the public API. Large runs often hit that limit. A key has a limit of its own, of one request per second. The plugin keeps to that limit. A run with a key is therefore slower. In exchange, fewer of its requests fail.

@@ -27,6 +27,18 @@ export function withNullAsReject<T>(promise: Promise<T | null>): Promise<T> {
   });
 }
 
+// A failure with a more precise name than its source, e.g. an invalid API key.
+// SourceTally records the label in place of the source name. In this way the
+// result panel names the actual problem.
+export class NamedFailure extends Error {
+  constructor(
+    readonly label: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 // How each source behaved during one lookup. "Answered" covers a source that
 // returned a verdict, including the verdict "I hold no record of this paper".
 // "Failed" covers a source that threw.
@@ -79,7 +91,7 @@ export class SourceTally {
   }
 
   private recordFailure(source: string, error: unknown): void {
-    this.failed.push(source);
+    this.failed.push(error instanceof NamedFailure ? error.label : source);
     this.log(`Metadata Hunter: ${source} failed: ${error}`);
   }
 }

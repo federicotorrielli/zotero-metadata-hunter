@@ -42,10 +42,11 @@ For items that already exist but are missing fields, the plugin looks up the can
 
 Open Zotero settings, then the Metadata Hunter pane.
 
-| Setting               | Meaning                                                                                                                                              |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Concurrent batch size | Items looked up in parallel. Higher is faster and hits the APIs harder. Default is 2.                                                                |
-| DBLP server           | Optional. A DBLP of your own, used before all the others. Leave it empty to use dblp.federicotorrielli.me, with the public DBLP servers as fallback. |
+| Setting                  | Meaning                                                                                                                                                                                                                                                                                      |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Concurrent batch size    | Items looked up in parallel. Higher is faster and hits the APIs harder. Default is 2.                                                                                                                                                                                                        |
+| DBLP server              | Optional. A DBLP of your own, used before all the others. Leave it empty to use dblp.federicotorrielli.me, with the public DBLP servers as fallback.                                                                                                                                         |
+| Semantic Scholar API key | Optional. A free personal key from [semanticscholar.org/product/api](https://www.semanticscholar.org/product/api). Without a key, Semantic Scholar shares one rate limit among all users. A key has a limit of one request per second. The plugin spaces its requests to keep to that limit. |
 
 By default the plugin queries dblp.federicotorrielli.me, a DBLP mirror kept by the maintainer. The public DBLP runs on three separate machines that serve the same index and go down one at a time. When the mirror does not reply, the plugin sends one small search request to each public server and keeps the first that replies. A server that fails later is set aside and the next one takes over, so dblp.org going down costs a few seconds instead of the whole run. When none of them replies, DBLP is skipped for a minute and the result panel names it as a failed source.
 

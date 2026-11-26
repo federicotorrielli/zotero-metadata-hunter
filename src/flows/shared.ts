@@ -3,6 +3,7 @@ import type { CancelToken } from "../core/cancel";
 import { createProgressReporter } from "../core/progress";
 import type { ProgressPanel } from "../modules/progress";
 import type { Lookups } from "../sources/lookups";
+import { INVALID_KEY } from "../sources/semanticScholar";
 import type { ZoteroApi, ZoteroItem } from "../types";
 import type { Params, Translate } from "../utils/locale";
 import type { Scope } from "./action";
@@ -93,19 +94,24 @@ export function tagUpdateFailed(deps: FlowDeps) {
 // Tail shared by the three panels: how many items a failing source stopped us
 // from checking, and a generic warning when something else went wrong. The
 // specific count already implies the warning, so the two never appear together.
+// An invalid API key is for the user to fix. Therefore it also gets its own
+// instructions.
 export function buildSkippedTail(
   t: Translate,
   stats: RunStats,
   skippedKey: string,
 ): string {
-  let text = "";
-  if (stats.skipped > 0) text += tail(t, skippedKey, { count: stats.skipped });
-  if (stats.sourceFailures.size > 0) {
+  const { skipped, sourceFailures, hadApiErrors } = stats;
+  let text = skipped > 0 ? tail(t, skippedKey, { count: skipped }) : "";
+  if (sourceFailures.size > 0) {
     text += tail(t, "common-source-failures", {
-      sources: formatSourceFailures(stats.sourceFailures),
+      sources: formatSourceFailures(sourceFailures),
     });
-  } else if (stats.hadApiErrors) {
+  } else if (hadApiErrors) {
     text += tail(t, "common-api-warning");
+  }
+  if (sourceFailures.has(INVALID_KEY)) {
+    text += tail(t, "common-s2-key-invalid");
   }
   return text;
 }

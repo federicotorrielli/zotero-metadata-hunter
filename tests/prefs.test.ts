@@ -8,7 +8,9 @@ import {
   MIN_BATCH,
   normalizeHost,
   readBatchSize,
+  readSemanticScholarKey,
   readUserDblpHost,
+  S2_KEY_PREF,
   type Prefs,
 } from "../src/prefs";
 
@@ -56,6 +58,19 @@ describe("DBLP host preference", () => {
   });
 });
 
+describe("Semantic Scholar key preference", () => {
+  it("trims the key and takes an empty one as none", () => {
+    expect(readSemanticScholarKey(prefsWith({ [S2_KEY_PREF]: " k1 " }))).toBe(
+      "k1",
+    );
+    expect(
+      readSemanticScholarKey(prefsWith({ [S2_KEY_PREF]: "  " })),
+    ).toBeNull();
+    expect(readSemanticScholarKey(prefsWith({}))).toBeNull();
+    expect(readSemanticScholarKey(throwing)).toBeNull();
+  });
+});
+
 // addon/preferences.js is plain script that the bundle does not include, so its
 // copies of these values are checked here.
 describe("preferences.js parity", () => {
@@ -66,6 +81,7 @@ describe("preferences.js parity", () => {
   it("uses the same names and bounds", () => {
     expect(read("BATCH_PREF")).toBe(BATCH_PREF);
     expect(read("DBLP_HOST_PREF")).toBe(DBLP_HOST_PREF);
+    expect(read("S2_KEY_PREF")).toBe(S2_KEY_PREF);
     expect(Number(read("DEFAULT"))).toBe(DEFAULT_BATCH);
     expect(Number(read("MIN"))).toBe(MIN_BATCH);
     expect(Number(read("MAX"))).toBe(MAX_BATCH);

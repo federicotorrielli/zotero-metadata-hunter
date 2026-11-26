@@ -6,6 +6,8 @@ import {
   findDOIForItem,
 } from "../src/flows/doi";
 import { TAG_NO_DOI } from "../src/flows/tags";
+import { NamedFailure } from "../src/net/tally";
+import { INVALID_KEY } from "../src/sources/semanticScholar";
 import { doiSource, makeHarness, makeItem } from "./harness";
 
 const title = "A Watermark for Large Language Models";
@@ -215,6 +217,17 @@ describe("DOI action", () => {
     expect(result.skipped).toBe(1);
     expect(message).toContain("1 item could not be checked.");
     expect(message).toContain("CrossRef (1)");
+  });
+
+  it("explains an invalid Semantic Scholar key in the result", async () => {
+    const h = makeHarness();
+    h.lookups.doiCascade.push(
+      doiSource("Semantic Scholar", new NamedFailure(INVALID_KEY, "401")),
+      doiSource("CrossRef", null),
+    );
+    const { message } = await run([makeItem({ fields: { title } })], h);
+    expect(message).toContain(`${INVALID_KEY} (1)`);
+    expect(message).toContain("Semantic Scholar did not accept the API key");
   });
 
   it("counts a worker that throws and goes on", async () => {

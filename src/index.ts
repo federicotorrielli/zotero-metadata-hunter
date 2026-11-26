@@ -20,10 +20,20 @@ import {
   type ToolbarDeps,
 } from "./modules/toolbar";
 import { createHttp } from "./net/http";
-import { readBatchSize, readUserDblpHost, type Prefs } from "./prefs";
+import { createThrottle } from "./net/throttle";
+import {
+  readBatchSize,
+  readSemanticScholarKey,
+  readUserDblpHost,
+  type Prefs,
+} from "./prefs";
 import { resolveTargetItems } from "./selection";
 import { createDblpPool } from "./sources/dblp";
 import { createLookups } from "./sources/lookups";
+import {
+  createSemanticScholarHttp,
+  KEY_INTERVAL_MS,
+} from "./sources/semanticScholar";
 import { createZoteroApi } from "./zoteroApi";
 import {
   getString,
@@ -89,6 +99,11 @@ function createSourceLookups(env: Env, clock: Clock) {
       readUserHost: () => readUserDblpHost(prefs),
       now: Date.now,
       log,
+    }),
+    semanticScholar: createSemanticScholarHttp({
+      http,
+      readKey: () => readSemanticScholarKey(prefs),
+      throttle: createThrottle(clock, KEY_INTERVAL_MS),
     }),
   });
 }

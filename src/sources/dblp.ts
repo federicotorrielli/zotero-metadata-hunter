@@ -46,7 +46,9 @@ export interface DblpPool {
 // have picked the one host unable to serve a lookup. A host that answers its
 // HTML error page under a 200 fails on the JSON parse, which is the intent.
 async function checkHost(http: Http, host: string): Promise<string> {
-  const data = await http.getJson(searchURL(host, "dblp", 1), CHECK_TIMEOUT_MS);
+  const data = await http.getJson(searchURL(host, "dblp", 1), {
+    timeoutMs: CHECK_TIMEOUT_MS,
+  });
   if (!data.result) throw new Error(`${host} replied without a result block`);
   return host;
 }

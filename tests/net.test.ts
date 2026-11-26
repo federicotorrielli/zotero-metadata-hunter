@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Clock } from "../src/core/batch";
 import { createHttp } from "../src/net/http";
-import { SourceTally, withNullAsReject, withTimeout } from "../src/net/tally";
+import {
+  NamedFailure,
+  SourceTally,
+  withNullAsReject,
+  withTimeout,
+} from "../src/net/tally";
+import { createThrottle } from "../src/net/throttle";
 
 afterEach(() => vi.useRealTimers());
 
@@ -74,6 +80,14 @@ describe("SourceTally", () => {
     expect(tally.failed).toEqual([]);
   });
 
+  it("records the label of a named failure in place of the source", async () => {
+    const tally = new SourceTally(log);
+    await tally.run("A", async () => {
+      throw new NamedFailure("A key", "not accepted");
+    });
+    expect(tally.failed).toEqual(["A key"]);
+  });
+
   it("rethrows a raced failure so Promise.any keeps waiting", async () => {
     const tally = new SourceTally(log);
     const winner = Promise.any([
@@ -101,6 +115,21 @@ describe("createHttp", () => {
     });
   });
 
+  it("adds the headers of a request to the user agent", async () => {
+    const request = vi.fn(
+      async (_m: string, _u: string, _o: Record<string, unknown>) => ({
+        status: 200,
+        responseText: "{}",
+      }),
+    );
+    const http = createHttp({ request, userAgent, clock: timerClock });
+    await http.getOptionalJson("https://x", { headers: { "x-api-key": "k" } });
+    expect(request.mock.calls[0][2].headers).toEqual({
+      "User-Agent": userAgent,
+      "x-api-key": "k",
+    });
+  });
+
   it("resolves a 404 to null for optional lookups and allows the code", async () => {
     const request = vi.fn(
       async (_m: string, _u: string, _o: Record<string, unknown>) => ({
@@ -121,5 +150,32 @@ describe("createHttp", () => {
     });
     const http = createHttp({ request, userAgent, clock: timerClock });
     await expect(http.get("https://x")).rejects.toThrow("429");
+  });
+});
+
+describe("createThrottle", () => {
+  it("starts tasks at least the interval apart, in arrival order", async () => {
+    const delays: number[] = [];
+    const clock = {
+      now: () => 0,
+      delay: async (ms: number) => void delays.push(ms),
+    };
+    const throttle = createThrottle(clock, 1_000);
+    const order: number[] = [];
+    await Promise.all(
+      [1, 2, 3].map((n) => throttle(async () => void order.push(n))),
+    );
+    expect(delays).toEqual([1_000, 2_000]);
+    expect(order).toEqual([1, 2, 3]);
+  });
+
+  it("does not wait when the interval has already passed", async () => {
+    let time = 0;
+    const delay = vi.fn(async () => {});
+    const throttle = createThrottle({ now: () => time, delay }, 1_000);
+    await throttle(async () => {});
+    time = 5_000;
+    await throttle(async () => {});
+    expect(delay).not.toHaveBeenCalled();
   });
 });

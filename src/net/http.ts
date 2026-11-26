@@ -18,10 +18,16 @@ export interface HttpDeps {
   clock: Pick<Clock, "after">;
 }
 
+export interface RequestOptions {
+  timeoutMs?: number;
+  // Added to the User-Agent, e.g. an API key.
+  headers?: Record<string, string>;
+}
+
 export interface Http {
-  get(url: string, timeoutMs?: number): Promise<HttpResponse>;
-  getJson(url: string, timeoutMs?: number): Promise<any>;
-  getOptionalJson(url: string, timeoutMs?: number): Promise<any | null>;
+  get(url: string, options?: RequestOptions): Promise<HttpResponse>;
+  getJson(url: string, options?: RequestOptions): Promise<any>;
+  getOptionalJson(url: string, options?: RequestOptions): Promise<any | null>;
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -38,10 +44,14 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 // has much higher rate limits than the anonymous one. The other APIs ignore the
 // extra text.
 export function createHttp({ request, userAgent, clock }: HttpDeps): Http {
-  const send = (url: string, timeoutMs: number, successCodes?: number[]) =>
+  const send = (
+    url: string,
+    { timeoutMs = DEFAULT_TIMEOUT_MS, headers }: RequestOptions = {},
+    successCodes?: number[],
+  ) =>
     withTimeout(
       request("GET", url, {
-        headers: { "User-Agent": userAgent },
+        headers: { "User-Agent": userAgent, ...headers },
         errorDelayMax: 0,
         ...(successCodes && { successCodes }),
       }),
@@ -50,10 +60,10 @@ export function createHttp({ request, userAgent, clock }: HttpDeps): Http {
     );
 
   return {
-    get: (url, timeoutMs = DEFAULT_TIMEOUT_MS) => send(url, timeoutMs),
+    get: (url, options) => send(url, options),
 
-    async getJson(url, timeoutMs = DEFAULT_TIMEOUT_MS) {
-      return JSON.parse((await send(url, timeoutMs)).responseText);
+    async getJson(url, options) {
+      return JSON.parse((await send(url, options)).responseText);
     },
 
     // For endpoints whose 404 means "no such record" and not "I could not
@@ -61,8 +71,8 @@ export function createHttp({ request, userAgent, clock }: HttpDeps): Http {
     // for an unmatched title, and both it and OpenAlex answer 404 for a DOI they
     // do not hold. Counting those as failures would suppress the "no DOI" tag
     // for every paper a source simply does not know. Resolves to null on 404.
-    async getOptionalJson(url, timeoutMs = DEFAULT_TIMEOUT_MS) {
-      const response = await send(url, timeoutMs, [200, 404]);
+    async getOptionalJson(url, options) {
+      const response = await send(url, options, [200, 404]);
       return response.status === 404 ? null : JSON.parse(response.responseText);
     },
   };

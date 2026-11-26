@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { Http } from "../src/net/http";
+import { NamedFailure } from "../src/net/tally";
+import type { Throttle } from "../src/net/throttle";
 import * as arxiv from "../src/sources/arxiv";
 import * as crossref from "../src/sources/crossref";
 import * as dblp from "../src/sources/dblp";
@@ -112,6 +115,60 @@ describe("semanticScholar", () => {
       },
     });
     expect(await semanticScholar.findPublishedDOI(http, title)).toBe("10.1/s");
+  });
+});
+
+describe("semanticScholar http with a key", () => {
+  const httpError = (status: number) =>
+    Object.assign(new Error(`HTTP ${status}`), { status });
+
+  function setup(key: string | null, answer: () => Promise<unknown>) {
+    const calls: unknown[] = [];
+    const send = async (_url: string, options?: unknown) => {
+      calls.push(options);
+      return answer();
+    };
+    const http = {
+      get: send,
+      getJson: send,
+      getOptionalJson: send,
+    } as unknown as Http;
+    const throttle = vi.fn((task: () => Promise<unknown>) => task());
+    const s2 = semanticScholar.createSemanticScholarHttp({
+      http,
+      readKey: () => key,
+      throttle: throttle as unknown as Throttle,
+    });
+    return { s2, calls, throttle };
+  }
+
+  it("passes requests through unchanged without a key", async () => {
+    const { s2, calls, throttle } = setup(null, async () => ({}));
+    await s2.getOptionalJson("u", { timeoutMs: 5 });
+    expect(calls).toEqual([{ timeoutMs: 5 }]);
+    expect(throttle).not.toHaveBeenCalled();
+  });
+
+  it("sends the key through the throttle", async () => {
+    const { s2, calls, throttle } = setup("k1", async () => ({}));
+    await s2.getJson("u");
+    expect(calls).toEqual([{ headers: { "x-api-key": "k1" } }]);
+    expect(throttle).toHaveBeenCalledTimes(1);
+  });
+
+  it("names an invalid key and keeps other errors as they are", async () => {
+    for (const status of [401, 403]) {
+      const { s2 } = setup("bad", async () => {
+        throw httpError(status);
+      });
+      const error = await s2.get("u").catch((e) => e);
+      expect(error).toBeInstanceOf(NamedFailure);
+      expect(error.label).toBe(semanticScholar.INVALID_KEY);
+    }
+    const { s2 } = setup("k1", async () => {
+      throw httpError(429);
+    });
+    await expect(s2.get("u")).rejects.not.toBeInstanceOf(NamedFailure);
   });
 });
 

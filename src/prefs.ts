@@ -4,6 +4,7 @@ import { config } from "../package.json";
 // bundled. A test keeps the two in step.
 export const BATCH_PREF = `${config.prefsPrefix}.batchSize`;
 export const DBLP_HOST_PREF = `${config.prefsPrefix}.dblpHost`;
+export const S2_KEY_PREF = `${config.prefsPrefix}.semanticScholarKey`;
 export const DEFAULT_BATCH = 2;
 export const MIN_BATCH = 1;
 export const MAX_BATCH = 12;
@@ -35,6 +36,15 @@ export function normalizeHost(raw: string): string | null {
 export function readUserDblpHost(prefs: Prefs): string | null {
   try {
     return normalizeHost(prefs.getString(DBLP_HOST_PREF, ""));
+  } catch {
+    return null;
+  }
+}
+
+// The Semantic Scholar API key, or null when none is set.
+export function readSemanticScholarKey(prefs: Prefs): string | null {
+  try {
+    return prefs.getString(S2_KEY_PREF, "").trim() || null;
   } catch {
     return null;
   }

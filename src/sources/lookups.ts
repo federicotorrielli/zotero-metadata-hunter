@@ -2,6 +2,7 @@ import type { DOIResult, PublishedRef, ZoteroItem } from "../types";
 import * as arxiv from "./arxiv";
 import * as crossref from "./crossref";
 import * as dblp from "./dblp";
+import type { Http } from "../net/http";
 import type { SourceDeps } from "./deps";
 import * as openalex from "./openalex";
 import * as openreview from "./openreview";
@@ -28,9 +29,15 @@ export interface Lookups {
   publishedByArxivId(arxivId: string): Promise<string | null>;
 }
 
-type Deps = SourceDeps & { dblp: dblp.DblpPool };
+// Semantic Scholar has an Http of its own, which sends the user's API key.
+type Deps = SourceDeps & { dblp: dblp.DblpPool; semanticScholar: Http };
 
-function doiCascade({ http, dblp: pool, ...xml }: Deps): Lookups["doiCascade"] {
+function doiCascade({
+  http,
+  dblp: pool,
+  semanticScholar: s2,
+  ...xml
+}: Deps): Lookups["doiCascade"] {
   return [
     {
       name: "CrossRef",
@@ -39,7 +46,7 @@ function doiCascade({ http, dblp: pool, ...xml }: Deps): Lookups["doiCascade"] {
     { name: "DBLP", find: (item, title) => dblp.findDOI(pool, item, title) },
     {
       name: "Semantic Scholar",
-      find: (_item, title) => semanticScholar.findDOI(http, title),
+      find: (_item, title) => semanticScholar.findDOI(s2, title),
     },
     {
       name: "arXiv",
@@ -49,25 +56,29 @@ function doiCascade({ http, dblp: pool, ...xml }: Deps): Lookups["doiCascade"] {
 }
 
 function abstractSources(deps: Deps): Lookups["abstracts"] {
-  const { http } = deps;
+  const { http, semanticScholar: s2 } = deps;
   return [
     {
       name: "Semantic Scholar",
-      find: (doi) => semanticScholar.findAbstract(http, doi),
+      find: (doi) => semanticScholar.findAbstract(s2, doi),
     },
     { name: "PubMed", find: (doi) => pubmed.findAbstract(deps, doi) },
     { name: "OpenAlex", find: (doi) => openalex.findAbstract(http, doi) },
   ];
 }
 
-function publishedSources({ http, dblp: pool }: Deps): Lookups["published"] {
+function publishedSources({
+  http,
+  dblp: pool,
+  semanticScholar: s2,
+}: Deps): Lookups["published"] {
   const asRef = (doi: string | null): PublishedRef | null =>
     doi ? { doi } : null;
   return [
     {
       name: "Semantic Scholar",
       find: async (_item, title) =>
-        asRef(await semanticScholar.findPublishedDOI(http, title)),
+        asRef(await semanticScholar.findPublishedDOI(s2, title)),
     },
     {
       name: "CrossRef",
