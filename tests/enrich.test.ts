@@ -112,7 +112,7 @@ describe("enrichItemMetadata", () => {
     expect(outcome.changed).not.toContain("abstractNote");
   });
 
-  it("asks the abstract sources when the record has no abstract", async () => {
+  it("queries the abstract sources when the record has no abstract", async () => {
     const h = makeHarness();
     h.api.next.doi = hydrated({ fields: { title, pages: "1-11" } });
     h.lookups.abstracts = [doiSource("PubMed", "From PubMed.")];

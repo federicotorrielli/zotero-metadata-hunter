@@ -33,10 +33,10 @@ async function translateDOI(
   return translate.translate(options);
 }
 
-// Zotero cleans translator creators when it saves an item, and nothing is saved
-// here. `setCreators` throws on an entry without a type or without a string
-// last name, after it has already overwritten the entries before it. So every
-// entry is made valid here, and one with no name at all is dropped.
+// Zotero cleans translator creators only when it saves an item. Here nothing
+// is saved. `setCreators` throws on an entry without a type or without a string
+// last name, after it has already overwritten the entries before it. Therefore
+// every entry is made valid here. An entry with no name at all is removed.
 function toCreator(raw: any): Creator | null {
   const text = (value: unknown) =>
     typeof value === "string" ? value.trim() : "";
@@ -44,8 +44,8 @@ function toCreator(raw: any): Creator | null {
   const last = text(raw.lastName) || text(raw.name);
   if (!first && !last) return null;
   const creatorType = text(raw.creatorType) || "author";
-  // A single-field name: an institution, or a person with only a given name,
-  // which Zotero rejects in two-field form.
+  // A name in one field: an institution, or a person with only a given name.
+  // Zotero does not accept those in the form with two fields.
   if (!last || raw.fieldMode === 1) {
     const lastName = [first, last].filter(Boolean).join(" ");
     return { firstName: "", lastName, fieldMode: 1, creatorType };
@@ -54,8 +54,8 @@ function toCreator(raw: any): Creator | null {
 }
 
 // A translator may use the base name of a field (publicationTitle) where the
-// item type has its own (proceedingsTitle). Zotero maps these when it saves an
-// item, and nothing is saved here, so the mapping is done by hand.
+// item type has its own (proceedingsTitle). Zotero maps these only when it
+// saves an item. Here nothing is saved. Therefore the mapping is done by hand.
 function toRecord(zotero: any, json: any): NormalizedRecord | null {
   const typeID = zotero.ItemTypes.getID(json.itemType);
   if (!typeID) return null;
@@ -73,8 +73,8 @@ function toRecord(zotero: any, json: any): NormalizedRecord | null {
 }
 
 // `libraryID: false` makes the translator return plain item JSON and save
-// nothing. No item is added to the library, so no notifier event fires and no
-// other plugin sees a duplicate of the item being enriched.
+// nothing. No item is added to the library. Therefore Zotero sends no notifier
+// event. No other plugin can see a duplicate of the item being enriched.
 async function lookupDOI(
   zotero: any,
   doi: string,

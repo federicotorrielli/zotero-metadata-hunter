@@ -36,8 +36,8 @@ export const analyzeItemsForEnrichment = (items: ZoteroItem[]): ZoteroItem[] =>
 
 // Looks the DOI up through Zotero's translators, the machinery behind "Add Item
 // by Identifier", and returns a plain record. The lookup saves nothing to the
-// library. An earlier version saved a scratch item and erased it, and plugins
-// that watch for new items reported that scratch as a duplicate.
+// library. An earlier version saved a scratch item and erased it. Plugins that
+// watch for new items then reported that scratch as a duplicate.
 export async function fetchRichRecordByDOI(
   deps: FlowDeps,
   doi: string,
@@ -148,8 +148,8 @@ async function mergeRichRecord(
     item,
     record,
   );
-  // CrossRef holds no abstract for many publishers (Elsevier among them), so
-  // an item still without one asks the abstract sources.
+  // CrossRef has no abstract for many publishers (Elsevier among them).
+  // Therefore an item that still has none queries the abstract sources.
   const abstract = await findAbstractForItem(deps, item, doi);
   if (abstract) {
     item.setField("abstractNote", abstract);

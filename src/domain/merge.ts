@@ -46,9 +46,9 @@ export interface MergeEnv {
 
 const trimmed = (value: string | undefined): string => (value ?? "").trim();
 
-// CrossRef serves abstracts as indented JATS XML, and other sources hard-wrap
-// theirs. Both leave line breaks in the middle of sentences, so every run of
-// whitespace becomes one space.
+// CrossRef serves abstracts as indented JATS XML. Other sources break their
+// lines at a fixed width. In both cases a sentence contains line breaks.
+// Therefore every run of whitespace becomes one space.
 export const cleanAbstract = (text: string): string =>
   text.replace(/\s+/g, " ").trim();
 
