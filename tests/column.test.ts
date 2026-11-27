@@ -26,6 +26,7 @@ describe("abstract column", () => {
       label: "Abstract?",
       pluginID: "plugin@id",
       dataProvider: abstractMark,
+      zoteroPersist: ["width"],
     });
   });
 });

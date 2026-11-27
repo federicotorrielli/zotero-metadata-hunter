@@ -22,5 +22,6 @@ export function registerAbstractColumn(
     label,
     pluginID,
     dataProvider: abstractMark,
+    zoteroPersist: ["width"],
   });
 }
