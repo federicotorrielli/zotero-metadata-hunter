@@ -65,7 +65,7 @@ A tag is only written when every source actually answered. If a lookup fails bec
 
 ## Development
 
-Requires Node.js 22.12 or newer, pnpm, and Zotero 10.
+Use Node.js 24.15 or a newer Node.js 24 release, pnpm 12.23.0, and Zotero 10. Other supported Node.js versions are listed in `package.json`.
 
 ```bash
 pnpm install

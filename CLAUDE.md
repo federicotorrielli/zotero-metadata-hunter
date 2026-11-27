@@ -14,7 +14,7 @@ pnpm run lint        # Prettier formatting + ESLint fixing (flat config in eslin
 pnpm test            # vitest, no Zotero needed (tests/ typechecks with tsconfig.tests.json)
 ```
 
-There is no watch mode. To run from source, point a Zotero extension proxy file at `build/addon` (see the README) and restart Zotero after each build. Tests need Node 22.12 or newer.
+There is no watch mode. To run from source, point a Zotero extension proxy file at `build/addon` (see the README) and restart Zotero after each build. Use Node.js 24.15 or a newer Node.js 24 release for development. Other supported Node.js versions are listed in `package.json`.
 
 ## Releasing
 
@@ -108,6 +108,8 @@ The preference `extensions.zotero.metadatahunter.dblpHost` (`DBLP_HOST_PREF` in 
 `pnpm test` runs vitest over `tests/`. The suites use fakes (`tests/helpers.ts` for items, `tests/harness.ts` for flow dependencies, `tests/doubles.ts` for sources) and the real FTL file, so a wrong message id or variable fails a test. `tests/ui.test.ts`, `tests/wiring.test.ts` and `tests/sources.test.ts` run under jsdom. What a test cannot cover, because it needs a running Zotero: `MozXULElement.insertFTLIfNeeded`, `MenuManager` rendering, and the real translators. Check those by hand in Zotero 10 after a change that touches them.
 
 **Build pipeline**: `scripts/build.mjs` delegates to `scripts/zotero-cmd.mjs`, which cleans output, copies `addon/` template (substituting `__version__` etc.), runs esbuild, then zips to `.xpi`.
+
+Template substitution uses Node's `globSync` and `scripts/templates.mjs`. Keep TypeScript on 6.0.x until typescript-eslint supports TypeScript 7 directly. The user chose this compatibility policy during the dependency update.
 
 ## Zotero version compatibility
 

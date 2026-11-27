@@ -2,6 +2,7 @@ import { execSync } from "child_process";
 import {
   copyFileSync,
   existsSync,
+  globSync,
   mkdirSync,
   readFileSync,
   writeFileSync,
@@ -11,7 +12,7 @@ import {
 import path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
-import { replaceInFileSync } from "replace-in-file";
+import { renderTemplate } from "./templates.mjs";
 import compressing from "compressing";
 import esbuild from "esbuild";
 
@@ -48,30 +49,20 @@ export async function build() {
 
   copyFolder(path.join(rootPath, "addon"), addonPath);
 
-  const replaceFrom = [
-    /__version__/g,
-    /__author__/g,
-    /__description__/g,
-    /__homepage__/g,
-    /__addonName__/g,
-    /__addonRef__/g,
-  ];
-
-  const replaceTo = [
-    pkg.version,
-    pkg.author.name || pkg.author,
-    pkg.description,
-    pkg.homepage,
-    pkg.config.addonName,
-    pkg.config.addonRef,
-  ];
-
-  replaceInFileSync({
-    files: [`${addonPath}/**/*.*`],
-    from: replaceFrom,
-    to: replaceTo,
-    countMatches: true,
-  });
+  const values = {
+    version: pkg.version,
+    author: pkg.author.name || pkg.author,
+    description: pkg.description,
+    homepage: pkg.homepage,
+    addonName: pkg.config.addonName,
+    addonRef: pkg.config.addonRef,
+  };
+  for (const file of globSync("**/*.*", { cwd: addonPath })) {
+    renderTemplate(path.join(addonPath, file), values, {
+      readFileSync,
+      writeFileSync,
+    });
+  }
 
   mkdirSync(path.join(addonPath, "content", "scripts"), { recursive: true });
 
